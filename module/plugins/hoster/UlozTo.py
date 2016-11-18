@@ -47,7 +47,7 @@ class UlozTo(SimpleHoster):
     CHECK_TRAFFIC = True
 
     ADULT_PATTERN   = r'PORNfile.cz'
-    PASSWD_PATTERN  = r'<div class="passwordProtectedFile">'
+    PASSWD_PATTERN  = r'frm-passwordProtectedForm'
     VIPLINK_PATTERN = r'<a href=".+?\?disclaimer=1" class="linkVip">'
     TOKEN_PATTERN   = r'<input type="hidden" name="_token_" .*?value="(.+?)"'
 
