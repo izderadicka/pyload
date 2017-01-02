@@ -532,6 +532,7 @@ def safename(value):
 
 def parse_name(value, safechar=True):
     path  = fixurl(encode(value, 'ascii', 'replace'), unquote=False)
+    path = path.replace('?', '_') # ? is bad for filenames
     url_p = urlparse.urlparse(path.rstrip('/'))
     name  = (url_p.path.split('/')[-1] or
              url_p.query.split('=', 1)[::-1][0].split('&', 1)[0] or
