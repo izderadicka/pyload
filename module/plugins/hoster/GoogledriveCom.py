@@ -13,14 +13,13 @@ from ..internal.misc import json
 class GoogledriveCom(Hoster):
     __name__ = "GoogledriveCom"
     __type__ = "hoster"
-    __version__ = "0.25"
+    __version__ = "0.27"
     __status__ = "testing"
 
-    __pattern__ = r'https?://(?:www\.)?(?:drive|docs)\.google\.com/(?:file/d/|(?:uc|open)\?.*id=)(?P<ID>[-\w]+)'
+    __pattern__ = r'https?://(?:www\.)?(?:drive|docs)\.google\.com/(?:file/d/|uc\?.*id=)(?P<ID>[-\w]+)'
     __config__ = [("activated", "bool", "Activated", True),
                   ("use_premium", "bool", "Use premium account if available", True),
-                  ("fallback", "bool",
-                   "Fallback to free download if premium fails", True),
+                  ("fallback", "bool", "Fallback to free download if premium fails", True),
                   ("chk_filesize", "bool", "Check file size", True),
                   ("max_wait", "int", "Reconnect if waiting time is greater than minutes", 10)]
 
@@ -40,25 +39,24 @@ class GoogledriveCom(Hoster):
     def api_response(self, cmd, **kwargs):
         kwargs['key'] = self.API_KEY
         try:
-            json_data = json.loads(
-                self.load(
-                    "%s%s/%s" %
-                    (self.API_URL,
-                     cmd,
-                     self.info['pattern']['ID']),
-                    get=kwargs))
+            json_data = json.loads(self.load("%s%s" % (self.API_URL, cmd),
+                                             get=kwargs))
             self.log_debug("API response: %s" % json_data)
             return json_data
 
         except BadHeader, e:
-            self.log_error(
-                "API Error: %s" %
-                cmd,
-                e,
-                "ID: %s" %
-                self.info['pattern']['ID'],
-                "Error code: %s" %
-                e.code)
+            try:
+                json_data = json.loads(e.content)
+                self.log_error("API Error: %s" % cmd,
+                               json_data['error']['message'],
+                               "ID: %s" % self.info['pattern']['ID'],
+                               "Error code: %s" % e.code)
+
+            except ValueError:
+                self.log_error("API Error: %s" % cmd,
+                               e,
+                               "ID: %s" % self.info['pattern']['ID'],
+                               "Error code: %s" % e.code)
             return None
 
     def api_download(self):
@@ -79,7 +77,7 @@ class GoogledriveCom(Hoster):
                 raise
 
     def process(self, pyfile):
-        json_data = self.api_response("files", fields="md5Checksum,name,size")
+        json_data = self.api_response("files/" + self.info['pattern']['ID'], fields="md5Checksum,name,size")
 
         if json_data is None:
             self.fail("API error")

@@ -11,14 +11,13 @@ from ..internal.SimpleHoster import SimpleHoster
 class OneFichierCom(SimpleHoster):
     __name__ = "OneFichierCom"
     __type__ = "hoster"
-    __version__ = "1.04"
+    __version__ = "1.12"
     __status__ = "testing"
 
-    __pattern__ = r'https?://(?:www\.)?(?:\w+\.)?(?P<HOST>1fichier\.com|alterupload\.com|cjoint\.net|d(?:es)?fichiers\.com|dl4free\.com|megadl\.fr|mesfichiers\.org|piecejointe\.net|pjointe\.com|tenvoi\.com)(?:/\?\w+)?'
+    __pattern__ = r'https?://(?:www\.)?(?:(?P<ID1>\w+)\.)?(?P<HOST>1fichier\.com|alterupload\.com|cjoint\.net|d(?:es)?fichiers\.com|dl4free\.com|megadl\.fr|mesfichiers\.org|piecejointe\.net|pjointe\.com|tenvoi\.com)(?:/\?(?P<ID2>\w+))?'
     __config__ = [("activated", "bool", "Activated", True),
                   ("use_premium", "bool", "Use premium account if available", True),
-                  ("fallback", "bool",
-                   "Fallback to free download if premium fails", True),
+                  ("fallback", "bool", "Fallback to free download if premium fails", True),
                   ("chk_filesize", "bool", "Check file size", True),
                   ("max_wait", "int", "Reconnect if waiting time is greater than minutes", 10)]
 
@@ -36,20 +35,22 @@ class OneFichierCom(SimpleHoster):
 
     DISPOSITION = False  # @TODO: Remove disposition in 0.4.10
 
-    URL_REPLACEMENTS = [("http:", "https:")]
+    URL_REPLACEMENTS = [(__pattern__ + '.*', lambda m:"https://1fichier.com/?" + (m.group('ID1') if m.group('ID1') else m.group('ID2')))]
 
     COOKIES = [("1fichier.com", "LG", "en")]
 
     NAME_PATTERN = r'>File\s*Name :</td>\s*<td.*>(?P<N>.+?)<'
     SIZE_PATTERN = r'>Size :</td>\s*<td.*>(?P<S>[\d.,]+) (?P<U>[\w^_]+)'
-    OFFLINE_PATTERN = r'(?:File not found !\s*<)|(?:>The requested file has been deleted following an abuse request\.<)'
+    OFFLINE_PATTERN = r'(?:File not found !\s*<)|(?:>The requested file has been deleted)'
     LINK_PATTERN = r'<a href="(.+?)".*>Click here to download the file</a>'
-    TEMP_OFFLINE_PATTERN = r'Warning ! Without subscription, you can only download one file at|Our services are in maintenance'
+    TEMP_OFFLINE_PATTERN = r'Without subscription, you can only download one file at|Our services are in maintenance'
+    PREMIUM_ONLY_PATTERN = r'is not possible to unregistered users|need a subscription'
 
     WAIT_PATTERN = r'>You must wait \d+ minutes'
 
     def setup(self):
         self.multiDL = self.premium
+        self.chunk_limit = -1 if self.premium else 1
         self.resume_download = True
 
     @classmethod
@@ -63,12 +64,11 @@ class OneFichierCom(SimpleHoster):
                     redirect = headers['location']
 
                 else:
-                    if 'content-type' in headers and headers[
-                            'content-type'] == "application/octet-stream":
+                    if headers.get('content-type') == "application/octet-stream":
                         if "filename=" in headers.get('content-disposition'):
                             _name = dict(
-                                _i.split("=") for _i in map(str.strip, headers[
-                                    'content-disposition'].split(";"))[1:])
+                                _i.split("=") for _i in
+                                map(str.strip, headers['content-disposition'].split(";"))[1:])
                             name = _name['filename'].strip("\"'")
                         else:
                             name = url
@@ -79,7 +79,7 @@ class OneFichierCom(SimpleHoster):
                                 'url': url}
 
                     else:
-                        info = SimpleHoster.get_info(url, html)
+                        info = super(OneFichierCom, cls).get_info(url, html)
 
                     break
 
@@ -96,18 +96,27 @@ class OneFichierCom(SimpleHoster):
         return info
 
     def handle_free(self, pyfile):
-        url, inputs = self.parse_html_form(
-            'action="https://1fichier.com/\?[\w^_]+')
+        url, inputs = self.parse_html_form('action="https://1fichier.com/\?[\w^_]+')
 
         if not url:
+            self.log_error(_("Free download form not found"))
             return
 
         if "pass" in inputs:
-            inputs['pass'] = self.get_password()
+            password = self.get_password()
 
+            if password:
+                inputs['pass'] = password
+
+            else:
+                self.fail(_("Download is password protected"))
+
+        inputs.pop('save', None)
         inputs['dl_no_ssl'] = "on"
 
         self.data = self.load(url, post=inputs)
+
+        self.check_errors()
 
         m = re.search(self.LINK_PATTERN, self.data)
         if m is not None:
@@ -116,7 +125,6 @@ class OneFichierCom(SimpleHoster):
     def handle_premium(self, pyfile):
         self.download(
             pyfile.url,
-            post={
-                'did': 0,
-                'dl_no_ssl': "on"},
+            post={'did': 0,
+                  'dl_no_ssl': "on"},
             disposition=False)  # @TODO: Remove disposition in 0.4.10

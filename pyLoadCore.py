@@ -64,6 +64,16 @@ sys.stdout = getwriter(enc)(sys.stdout, errors="replace")
 # - configurable auth system ldap/mysql
 # - cron job like sheduler
 
+
+def exceptHook(exc_type, exc_value, exc_traceback):
+    logger = logging.getLogger("log")
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logger.error("<<< UNCAUGHT EXCEPTION >>>", exc_info=(exc_type, exc_value, exc_traceback))
+
+
 class Core(object):
     """pyLoad Core, one tool to rule them all... (the filehosters) :D"""
 
@@ -333,6 +343,8 @@ class Core(object):
         else:
             self.init_logger(logging.INFO) # logging level
 
+        sys.excepthook = exceptHook
+
         self.do_kill = False
         self.do_restart = False
         self.shuttedDown = False
@@ -455,10 +467,16 @@ class Core(object):
         locals().clear()
 
         while True:
-            sleep(2)
+            try:
+                sleep(2)
+            except IOError, e:
+                if e.errno != 4:  # errno.EINTR
+                    raise
+
             if self.do_restart:
                 self.log.info(_("restarting pyLoad"))
                 self.restart()
+
             if self.do_kill:
                 self.shutdown()
                 self.log.info(_("pyLoad quits"))

@@ -10,8 +10,7 @@ import mimetypes
 from module.network.HTTPRequest import BadHeader
 
 from .Base import Base
-from .misc import (compute_checksum, encode, exists, fixurl, fsjoin,
-                   parse_name, safejoin)
+from .misc import compute_checksum, encode, exists, fixurl, fsjoin, parse_name, safejoin
 from .Plugin import Fail
 
 # Python 2.5 compatibility hack for property.setter, property.deleter
@@ -34,7 +33,7 @@ if not hasattr(__builtin__.property, "setter"):
 class Hoster(Base):
     __name__ = "Hoster"
     __type__ = "hoster"
-    __version__ = "0.64"
+    __version__ = "0.73"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -74,10 +73,14 @@ class Hoster(Base):
         #: Restart flag
         self.restart_free = False  # @TODO: Recheck in 0.4.10
 
+        #: Download is possible with premium account only, don't fallback to free download
+        self.no_fallback = False
+
     def setup_base(self):
         self.last_download = None
         self.last_check = None
         self.restart_free = False
+        self.no_fallback = False
 
         if self.account:
             self.chunk_limit = -1  #: -1 for unlimited
@@ -91,36 +94,39 @@ class Hoster(Base):
             self.account = False
             self.user = None  # @TODO: Remove in 0.4.10
         else:
-            super(Hoster, self).load_account()
+            Base.load_account(self)
             # self.restart_free = False
 
     def _process(self, thread):
         self.thread = thread
 
-        self._initialize()
-        self._setup()
-
-        #@TODO: Enable in 0.4.10
-        # self.pyload.hookManager.downloadPreparing(self.pyfile)
-        # self.check_status()
-        self.check_duplicates()
-
-        self.pyfile.setStatus("starting")
-
         try:
-            self.log_info(_("Processing url: ") + self.pyfile.url)
-            self.process(self.pyfile)
-            self.check_status()
+            self._initialize()
+            self._setup()
 
-            self._check_download()
+            #@TODO: Enable in 0.4.10
+            # self.pyload.hookManager.downloadPreparing(self.pyfile)
+            # self.check_status()
+            self.check_duplicates()
 
-        except Fail, e:  # @TODO: Move to PluginThread in 0.4.10
-            if self.config.get('fallback', True) and self.premium:
-                self.log_warning(_("Premium download failed"), e)
-                self.restart(premium=False)
+            self.pyfile.setStatus("starting")
 
-            else:
-                raise Fail(encode(e))
+            try:
+                self.log_info(_("Processing url: ") + self.pyfile.url)
+                self.process(self.pyfile)
+                self.check_status()
+
+                self._check_download()
+
+            except Fail, e:  # @TODO: Move to PluginThread in 0.4.10
+                self.log_warning(_("Premium download failed") if self.premium else
+                                 _("Free download failed"),
+                                 e)
+                if self.no_fallback is False and self.config.get('fallback', True) and self.premium:
+                    self.restart(premium=False)
+
+                else:
+                    raise Fail(encode(e))
 
         finally:
             self._finalize()
@@ -246,7 +252,7 @@ class Hoster(Base):
             self.captcha.correct()
 
     def download(self, url, get={}, post={}, ref=True, cookies=True,
-                 disposition=True, resume=None, chunks=None):
+                 disposition=True, resume=None, chunks=None, fixurl=True):
         """
         Downloads the content at url to download folder
 
@@ -266,7 +272,7 @@ class Hoster(Base):
                            *["%s=%s" % (key, value) for key, value in locals().items()
                              if key not in ("self", "url", "_[1]")])
 
-        dl_url = self.fixurl(url)
+        dl_url = self.fixurl(url) if fixurl else url
         dl_basename = parse_name(self.pyfile.name)
 
         self.pyfile.name = dl_basename
@@ -475,8 +481,13 @@ class Hoster(Base):
 
         :raises Skip:
         """
-        pack_folder = self.pyfile.package().folder if self.pyload.config.get(
-            'general', 'folder_per_package') else ""
+        pack_folder = self.pyfile.package().folder
+
+        for pyfile in self.pyload.files.cache.values():
+            if pyfile != self.pyfile and pyfile.name == self.pyfile.name and pyfile.package().folder == pack_folder:
+                if pyfile.status in (0, 12, 5, 7):  # finished / downloading / waiting / starting
+                    self.skip(pyfile.pluginname)
+
         dl_folder = self.pyload.config.get('general', 'download_folder')
         dl_file = fsjoin(dl_folder, pack_folder, self.pyfile.name)
 
@@ -489,16 +500,24 @@ class Hoster(Base):
             return
 
         if self.pyload.config.get('download', 'skip_existing'):
-            plugin = self.pyload.db.findDuplicates(
-                self.pyfile.id, pack_folder, self.pyfile.name)
+            plugin = self.pyload.db.findDuplicates(self.pyfile.id, pack_folder, self.pyfile.name)
             msg = plugin[0] if plugin else _("File exists")
             self.skip(msg)
+
         else:
-            dl_n = int(
-                re.match(
-                    r'.+(\(\d+\)|)$',
-                    self.pyfile.name).group(1).strip("()") or 1)
-            self.pyfile.name += " (%s)" % (dl_n + 1)
+            # Same file exists but it does not belongs to our pack, add a trailing counter
+            m = re.match(r'(.+?)(?: \((\d+)\))?(\..+)?$', self.pyfile.name)
+            dl_n = int(m.group(2) or "0")
+
+            while True:
+                name = "%s (%s)%s" % (m.group(1), dl_n + 1, m.group(3) or "")
+                dl_file = fsjoin(dl_folder, pack_folder, name)
+                if not exists(dl_file):
+                    break
+
+                dl_n += 1
+
+            self.pyfile.name = name
 
     #: Deprecated method (Recheck in 0.4.10)
     def checkForSameFiles(self, *args, **kwargs):

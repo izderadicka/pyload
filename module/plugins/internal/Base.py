@@ -26,7 +26,7 @@ def parse_fileInfo(klass, url="", html=""):
 class Base(Plugin):
     __name__ = "Base"
     __type__ = "base"
-    __version__ = "0.29"
+    __version__ = "0.33"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -183,14 +183,14 @@ class Base(Plugin):
                 self.account = False
 
     def _update_name(self):
-        name = self.info.get('name')
+        name = decode(self.info.get('name'))
 
-        if name and name != self.info.get('url'):
+        if name and name != decode(self.info.get('url')):
             self.pyfile.name = name
         else:
-            name = self.pyfile.name
+            name = decode(self.pyfile.name)
 
-        self.log_info(_("Link name: ") + name)
+        self.log_info(_("Link name: %s") % name)
 
     def _update_size(self):
         size = self.info.get('size')
@@ -273,6 +273,11 @@ class Base(Plugin):
         # self.pyload.hookManager.downloadPreparing(self.pyfile)
         # self.check_status()
 
+        #@TODO: Remove in 0.4.10
+        if self.__type__ == "crypter":
+            self.pyload.hookManager.downloadPreparing(self.pyfile)
+            self.check_status()
+
         self.pyfile.setStatus("starting")
 
         self.log_info(_("Processing url: ") + self.pyfile.url)
@@ -295,10 +300,11 @@ class Base(Plugin):
         raise NotImplementedError
 
     def set_reconnect(self, reconnect):
-        self.log_debug("RECONNECT %s required" % ("" if reconnect else "not"),
-                       "Previous wantReconnect: %s" % self.wantReconnect)
-        self.wantReconnect = bool(reconnect)
-        return True
+        if self.pyload.config.get('reconnect', 'activated'):
+            reconnect = reconnect and self.pyload.api.isTimeReconnect()
+            self.log_debug("RECONNECT%s required" % ("" if reconnect else " not"),
+                           "Previous wantReconnect: %s" % self.wantReconnect)
+            self.wantReconnect = bool(reconnect)
 
     def set_wait(self, seconds, strict=False):
         """
@@ -328,8 +334,10 @@ class Base(Plugin):
         if seconds is not None:
             self.set_wait(seconds)
 
-        if reconnect is not None:
-            self.set_reconnect(reconnect)
+        if reconnect is None:
+            reconnect = (seconds > self.config.get('max_wait', 10) * 60)
+
+        self.set_reconnect(reconnect)
 
         wait_time = self.pyfile.waitUntil - time.time()
 
@@ -462,9 +470,10 @@ class Base(Plugin):
         if 0 < attemps <= self.retries[id]:
             self.fail(msg or _("Max retries reached"))
 
-        self.wait(wait, False)
-
         self.retries[id] += 1
+
+        self.wait(wait)
+
         raise Retry(encode(msg))  # @TODO: Remove `encode` in 0.4.10
 
     def retry_captcha(self, attemps=10, wait=1,
@@ -485,7 +494,7 @@ class Base(Plugin):
 
     def load(self, *args, **kwargs):
         self.check_status()
-        return super(Base, self).load(*args, **kwargs)
+        return Plugin.load(self, *args, **kwargs)
 
     def parse_html_form(self, attr_str="", input_names={}):
         return parse_html_form(attr_str, self.data, input_names)
@@ -500,7 +509,7 @@ class Base(Plugin):
         """
         Clean everything and remove references
         """
-        super(Base, self).clean()
+        Plugin.clean(self)
         for attr in ("account", "html", "pyfile", "thread"):
             if hasattr(self, attr):
                 setattr(self, attr, None)

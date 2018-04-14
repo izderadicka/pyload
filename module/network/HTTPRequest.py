@@ -17,13 +17,13 @@
     @author: RaNaN
 """
 
+import cStringIO
 import pycurl
 
 from codecs import getincrementaldecoder, lookup, BOM_UTF8
 from urllib import quote, urlencode
 from httplib import responses
 from logging import getLogger
-from cStringIO import StringIO
 
 from module.plugins.Plugin import Abort
 
@@ -37,17 +37,35 @@ def myurlencode(data):
 
 bad_headers = range(400, 404) + range(405, 418) + range(500, 506)
 
+unofficial_responses = {
+    440: "Login Timeout - The client's session has expired and must log in again.",
+    449: 'Retry With - The server cannot honour the request because the user has not provided the required information',
+    451: 'Redirect - Unsupported Redirect Header',
+    509: 'Bandwidth Limit Exceeded',
+    520: 'Unknown Error',
+    521: 'Web Server Is Down - The origin server has refused the connection from CloudFlare',
+    522: 'Connection Timed Out - CloudFlare could not negotiate a TCP handshake with the origin server',
+    523: 'Origin Is Unreachable - CloudFlare could not reach the origin server',
+    524: 'A Timeout Occurred - CloudFlare did not receive a timely HTTP response',
+    525: 'SSL Handshake Failed - CloudFlare could not negotiate a SSL/TLS handshake with the origin server',
+    526: 'Invalid SSL Certificate - CloudFlare could not validate the SSL/TLS certificate that the origin server presented',
+    527: 'Railgun Error - CloudFlare requests timeout or failed after the WAN connection has been established',
+    530: 'Site Is Frozen - Used by the Pantheon web platform to indicate a site that has been frozen due to inactivity'}
+
 class BadHeader(Exception):
-    def __init__(self, code, content=""):
-        Exception.__init__(self, "Bad server response: %s %s" % (code, responses[int(code)]))
-        self.code = code
+    def __init__(self, code, header="", content=""):
+        int_code = int(code)
+        Exception.__init__(self, "Bad server response: %s %s" %
+                           (code, responses.get(int_code, unofficial_responses.get(int_code, "unknown error code"))))
+        self.code = int_code
+        self.header = header
         self.content = content
 
 
 class HTTPRequest():
     def __init__(self, cookies=None, options=None):
         self.c = pycurl.Curl()
-        self.rep = StringIO()
+        self.rep = None
 
         self.cj = cookies #cookiejar
 
@@ -85,7 +103,7 @@ class HTTPRequest():
         #self.c.setopt(pycurl.VERBOSE, 1)
 
         self.c.setopt(pycurl.USERAGENT,
-            "Mozilla/5.0 (Windows NT 6.1; Win64; x64;en; rv:5.0) Gecko/20110619 Firefox/5.0")
+            "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:55.0) Gecko/20100101 Firefox/55.0")
         if pycurl.version_info()[7]:
             self.c.setopt(pycurl.ENCODING, "gzip, deflate")
         self.c.setopt(pycurl.HTTPHEADER, ["Accept: */*",
@@ -146,6 +164,8 @@ class HTTPRequest():
     def setRequestContext(self, url, get, post, referer, cookies, multipart=False):
         """ sets everything needed for the request """
 
+        self.rep = cStringIO.StringIO()
+
         url = myquote(url)
 
         if get:
@@ -205,9 +225,15 @@ class HTTPRequest():
 
         self.c.setopt(pycurl.POSTFIELDS, "")
         self.lastEffectiveURL = self.c.getinfo(pycurl.EFFECTIVE_URL)
-        self.code = self.verifyHeader()
 
         self.addCookies()
+
+        try:
+            self.code = self.verifyHeader()
+
+        finally:
+            self.rep.close()
+            self.rep = None
 
         if decode:
             rep = self.decodeResponse(rep)
@@ -219,7 +245,7 @@ class HTTPRequest():
         code = int(self.c.getinfo(pycurl.RESPONSE_CODE))
         if code in bad_headers:
             #404 will NOT raise an exception
-            raise BadHeader(code, self.getResponse())
+            raise BadHeader(code, self.header, self.getResponse())
         return code
 
     def checkHeader(self):
@@ -228,11 +254,11 @@ class HTTPRequest():
 
     def getResponse(self):
         """ retrieve response from string io """
-        if self.rep is None: return ""
-        value = self.rep.getvalue()
-        self.rep.close()
-        self.rep = StringIO()
-        return value
+        if self.rep is None:
+            return ""
+
+        else:
+            return self.rep.getvalue()
 
     def decodeResponse(self, rep):
         """ decode with correct encoding, relies on header """
@@ -272,7 +298,8 @@ class HTTPRequest():
         """ writes response """
         if self.rep.tell() > 1000000 or self.abort:
             rep = self.getResponse()
-            if self.abort: raise Abort()
+            if self.abort:
+                raise Abort()
             f = open("response.dump", "wb")
             f.write(rep)
             f.close()
@@ -292,9 +319,13 @@ class HTTPRequest():
 
     def close(self):
         """ cleanup, unusable after this """
-        self.rep.close()
+        if self.rep:
+            self.rep.close()
+            del self.rep
+
         if hasattr(self, "cj"):
             del self.cj
+
         if hasattr(self, "c"):
             self.c.close()
             del self.c

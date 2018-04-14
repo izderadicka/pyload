@@ -17,6 +17,8 @@
     @author: RaNaN
 """
 
+from module.common.json_layer import json
+
 import sys
 import module.common.pylgettext as gettext
 
@@ -75,16 +77,20 @@ if not exists(cache):
     makedirs(cache)
 
 bcc = FileSystemBytecodeCache(cache, '%s.cache')
-loader = PrefixLoader({
-    "default": FileSystemLoader(join(PROJECT_DIR, "templates", "default")),
-    'js': FileSystemLoader(join(PROJECT_DIR, 'media', 'js'))
-})
+
+mapping = {'js': FileSystemLoader(join(PROJECT_DIR, 'media', 'js'))}
+for template in os.listdir(join(PROJECT_DIR, "templates")):
+    if os.path.isdir(join(PROJECT_DIR, "templates", template)):
+        mapping[template] = FileSystemLoader(join(PROJECT_DIR, "templates", template))
+
+loader = PrefixLoader(mapping)
 
 env = Environment(loader=loader, extensions=['jinja2.ext.i18n', 'jinja2.ext.autoescape'], trim_blocks=True, auto_reload=False,
     bytecode_cache=bcc)
 
 from filters import quotepath, path_make_relative, path_make_absolute, truncate, date
 
+env.filters["tojson"] = json.dumps
 env.filters["quotepath"] = quotepath
 env.filters["truncate"] = truncate
 env.filters["date"] = date
@@ -94,10 +100,7 @@ env.filters["decode"] = decode
 env.filters["type"] = lambda x: str(type(x))
 env.filters["formatsize"] = formatSize
 env.filters["getitem"] = lambda x, y: x.__getitem__(y)
-if PREFIX:
-    env.filters["url"] = lambda x: x
-else:
-    env.filters["url"] = lambda x: PREFIX + x if x.startswith("/") else x
+env.filters["url"] = lambda x: PREFIX + x if x.startswith("/") else x
 
 gettext.setpaths([join(os.sep, "usr", "share", "pyload", "locale"), None])
 translation = gettext.translation("django", join(PYLOAD_DIR, "locale"),
