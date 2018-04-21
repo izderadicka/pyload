@@ -124,7 +124,7 @@ class UlozTo(SimpleHoster):
             data = json.loads(xapca)
             if self.config.get("captcha") == "Sound":
                 captcha_value = self.captcha.decrypt(
-                    str(data['sound']), input_type='wav', ocr="UlozTo")
+                    str(data['sound']), input_type='mp3', ocr="UlozTo")
             else:
                 captcha_value = self.captcha.decrypt(data['image'])
             self.log_debug(
