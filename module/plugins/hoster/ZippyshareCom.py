@@ -12,7 +12,7 @@ from ..internal.SimpleHoster import SimpleHoster
 class ZippyshareCom(SimpleHoster):
     __name__ = "ZippyshareCom"
     __type__ = "hoster"
-    __version__ = "0.95"
+    __version__ = "0.98"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?P<HOST>www\d{0,3}\.zippyshare\.com)/(?:[vd]/|view\.jsp.*key=)(?P<KEY>[\w^_]+)'
@@ -102,4 +102,3 @@ class ZippyshareCom(SimpleHoster):
         scripts = inits + scripts + ['document.dlbutton.href']
 
         return self.js.eval('\n'.join(scripts))
-

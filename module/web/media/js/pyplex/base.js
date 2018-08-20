@@ -16,13 +16,13 @@ function indicateSuccess(message) {
    }
 
     indicateFinish();
-    $.bootstrapPurr(message + '.', {
-        offset: {amount: 5},
-        type: 'success',
-        align: 'center',
-        draggable: false,
-        allowDismiss: false
+    var bar = new $.peekABar({
+        html: "<h4>" + message + '.' + "</h4>",
+        padding: "6px",
+        backgroundColor: '#B5BFC2',
+        autohide: true
     });
+    bar.show();
 }
 
 function indicateFail(message) {
@@ -31,13 +31,13 @@ function indicateFail(message) {
    }
 
     indicateFinish();
-    $.bootstrapPurr(message + '.', {
-        offset: {amount: 5},
-        type: 'danger',
-        align: 'center',
-        draggable: false,
-        allowDismiss: false
+    var bar = new $.peekABar({
+        html: "<h4>" + message + '.' + "</h4>",
+        padding: "6px",
+        backgroundColor: '#FF4500',
+        autohide: true
     });
+    bar.show();
 }
 
 function humanFileSize(f) {
@@ -203,24 +203,30 @@ $(function() {
 
     $("#add_form").submit(function(event) {
         event.preventDefault();
-        if ($("#add_name").value === "" && $("#add_file").value === "") {
+        var formData = new FormData(this);
+        var $this = $(this);
+        if ($this.find("#add_name").val() === "" && $this.find("#add_file").val() === "") {
             alert("{{_('Please Enter a package name.')}}");
             return false;
         } else {
-            var form = new FormData(this);
             $.ajax({
-                    url: "{{'/json/add_package'|url}}",
-                    method: "POST",
-                    data: form,
-                    processData: false,
-                    contentType: false
+                url: "{{'/json/add_package'|url}}",
+                method: "POST",
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function() {
+                    var queue = $this.find("#add_dest").val() === "1" ? "queue" : "collector";
+                    var re = new RegExp("/" + queue + "/?$", "i");
+                    if (window.location.toString().match(re)) {
+                        window.location.reload();
+                    }
+                },
+                error: function() {
+                    indicateFail("{{_('Error occurred')}}");
+                }
             });
-            $('#add_box').modal('hide');
-            var queue = form.get("add_dest") === "1" ? "queue" : "collector";
-            var re = new RegExp("/" + queue + "/?$", "i");
-            if (window.location.toString().match(re)) {
-                window.location.reload();
-            }
+            $("#add_box").modal('hide');
             return false;
         }
     });
@@ -232,7 +238,7 @@ $(function() {
     $("#action_play").click(function() {
         $.get("{{'/api/unpauseServer'|url}}", function () {
             $.ajax({
-                method: "post",
+                method: "POST",
                 url: "{{'/json/status'|url}}",
                 async: true,
                 timeout: 3000,
@@ -248,7 +254,7 @@ $(function() {
     $("#action_stop").click(function() {
         $.get("{{'/api/pauseServer'|url}}", function () {
             $.ajax({
-                method: "post",
+                method: "POST",
                 url: "{{'/json/status'|url}}",
                 async: true,
                 timeout: 3000,
@@ -268,7 +274,7 @@ $(function() {
 
     $("#cap_box #cap_positional").click(on_captcha_click);
     $.ajax({
-        method:"post",
+        method: "POST",
         url: "{{'/json/status'|url}}",
         async: true,
         timeout: 3000,
@@ -277,7 +283,7 @@ $(function() {
 
     setInterval(function() {
         $.ajax({
-            method:"post",
+            method: "POST",
             url: "{{'/json/status'|url}}",
             async: true,
             timeout: 3000,
@@ -296,12 +302,14 @@ function LoadJsonToContent(a) {
         var notificationVisible = ($("#cap_info").css("display") !== "none");
         if (!notificationVisible) {
             $("#cap_info").css('display','inline');
-            $.bootstrapPurr("{{_('New Captcha Request')}}",{
-                offset: { amount: 10},
-                align: 'center',
-                draggable: false,
-                allowDismiss: false
+            var bar = new $.peekABar({
+                html: "<h4>{{_('New Captcha Request')}}</h4>",
+                padding: "6px",
+                backgroundColor: '#5CB85C',
+                delay: 5000,
+                autohide: true
             });
+            bar.show();
         }
         if (desktopNotifications && !document.hasFocus() && !notificationVisible) {
             notification = new Notification('pyLoad', {
@@ -381,7 +389,7 @@ function clear_captcha() {
 }
 
 function submit_captcha() {
-    load_captcha("post", "cap_id=" + $("#cap_id").val() + "&cap_result=" + $("#cap_result").val());
+    load_captcha("POST", "cap_id=" + $("#cap_id").val() + "&cap_result=" + $("#cap_result").val());
     $("#cap_result").val("");
     return false;
 }
