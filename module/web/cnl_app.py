@@ -1,13 +1,13 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from os.path import join
+
 import re
-from urllib import unquote
 from base64 import standard_b64decode
 from binascii import unhexlify
+from urllib import unquote
 
-from bottle import route, request, HTTPError
-from webinterface import PYLOAD, DL_ROOT, JS
+from bottle import HTTPError, request, route
+from module.utils import save_join
+from webinterface import DL_ROOT, JS, PYLOAD
 
 try:
     from Crypto.Cipher import AES
@@ -37,7 +37,7 @@ def flash(id="0"):
 @local_check
 def add():
     package = request.forms.get("package", request.forms.get("source", request.POST.get('referer', None)))
-    urls = [x.strip() for x in request.POST['urls'].split("\n") if x.strip()]
+    urls = [x.decode('latin1').strip() for x in request.POST['urls'].split("\n") if x.decode('latin1').strip()]
 
     if package:
         PYLOAD.addPackage(package, urls, 0)
@@ -52,7 +52,7 @@ def addcrypted():
     package = request.forms.get("package", request.forms.get("source", request.POST.get('referer', None)))
     dlc = request.forms['crypted'].replace(" ", "+")
 
-    dlc_path = join(DL_ROOT, package.replace("/", "").replace("\\", "").replace(":", "") + ".dlc")
+    dlc_path = save_join(DL_ROOT, package.replace("/", "").replace("\\", "").replace(":", "") + ".dlc")
     dlc_file = open(dlc_path, "wb")
     dlc_file.write(dlc)
     dlc_file.close()
@@ -100,7 +100,7 @@ def addcrypted2():
     obj = AES.new(Key, AES.MODE_CBC, IV)
     urls = obj.decrypt(crypted).replace("\x00", "").replace("\r","").split("\n")
 
-    urls = [x.strip() for x in urls if x.strip()]
+    urls = [x.decode('latin1').strip() for x in urls if x.decode('latin1').strip()]
 
     try:
         if package:
@@ -123,7 +123,7 @@ def flashgot():
 
     autostart = int(request.forms.get('autostart', 0))
     package = request.forms.get('package', None)
-    urls = [x.strip() for x in request.POST['urls'].split("\n") if x.strip()]
+    urls = [x.decode('latin1').strip() for x in request.POST['urls'].split("\n") if x.decode('latin1').strip()]
     folder = request.forms.get('dir', None)
 
     if package:

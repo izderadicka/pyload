@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-
+import pycurl
+import urlparse
 import re
 import os
 
@@ -16,7 +17,7 @@ def convert_decimal_prefix(m):
 class UlozTo(SimpleHoster):
     __name__ = "UlozTo"
     __type__ = "hoster"
-    __version__ = "1.40"
+    __version__ = "1.46"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:www\.)?(uloz\.to|ulozto\.(cz|sk|net)|bagruj\.cz|zachowajto\.pl|pornfile\.cz)/(?:live/)?(?P<ID>[!\w]+/[^/?]*)'
@@ -38,9 +39,9 @@ class UlozTo(SimpleHoster):
     NAME_PATTERN = r'(<p>File <strong>|<title>)(?P<N>.+?)(<| \|)'
     SIZE_PATTERN = r'<span id="fileSize">.*?(?P<S>[\d.,]+\s[kMG]?B)</span>'
     OFFLINE_PATTERN = r'<title>404 - Page not found</title>|<h1 class="h1">File (has been deleted|was banned)</h1>'
+    TEMP_OFFLINE_PATTERN = r"<title>500 - Internal Server Error</title>"
 
-    URL_REPLACEMENTS = [(r'(?<=http://)([^/]+)', "www.ulozto.net"),
-                        ("http://", "https://"),
+    URL_REPLACEMENTS = [("http://", "https://"),
                         (r'(uloz\.to|ulozto\.(cz|sk|net)|bagruj\.cz|zachowajto\.pl|pornfile\.cz)', "ulozto.net")]
 
     SIZE_REPLACEMENTS = [(r'([\d.]+)\s([kMG])B', convert_decimal_prefix)]
@@ -81,10 +82,20 @@ class UlozTo(SimpleHoster):
     def handle_free(self, pyfile):
         is_adult = self.adult_confirmation(pyfile)
 
-        action, inputs = self.parse_html_form(
-            'id="frm-download-freeDownloadTab-freeDownloadForm"')
-        if not action or not inputs:
+        #Let's try to find direct download
+        m = re.search(r'<a id="limitedDownloadButton".*?href="(.*?)"', self.data)
+        if m:
+            domain = "https://pornfile.cz" if is_adult else "https://ulozto.net"
+            self.download(domain + m.group(1))
+            return
+
+        m = re.search(r'<a .* data-href="(.*)" class=".*js-free-download-button-dialog.*?"', self.data)
+        if not m:
             self.error(_("Free download form not found"))
+
+        self.data = self.load(self.fixurl(m.group(1)))
+
+        action, inputs = self.parse_html_form('id="frm-freeDownloadForm-form"')
 
         self.log_debug("inputs.keys = %s" % inputs.keys())
         #: Get and decrypt captcha
@@ -112,7 +123,7 @@ class UlozTo(SimpleHoster):
             #: New version - better to get new parameters (like captcha reload) because of image url - since 6.12.2013
             self.log_debug('Using "new" version')
 
-            xapca = self.load("https://www.ulozto.net/reloadXapca.php",
+            xapca = self.load("https://ulozto.net/reloadXapca.php",
                               get={'rnd': timestamp()})
 
             xapca = xapca.replace(
@@ -154,12 +165,17 @@ class UlozTo(SimpleHoster):
         else:
             self.error(_("CAPTCHA form changed"))
 
-        domain = "https://www.pornfile.cz" if is_adult else "https://www.ulozto.net"
-        self.download(domain + action, post=inputs)
+        domain = "https://pornfile.cz" if is_adult else "https://ulozto.net"
+        jsvars = self.get_json_response(domain + action, inputs)
+        self.download(jsvars['downloadLink'])
 
     def handle_premium(self, pyfile):
-        self.adult_confirmation(pyfile)
-        self.download(pyfile.url, get={'do': "directDownload"})
+        m = re.search("/file/(.+)/", pyfile.url)
+        if not m:
+            self.error(_("Premium link not found"))
+
+        premium_url = urlparse.urljoin("https://ulozto.net/quickDownload/", m.group(1))
+        self.download(premium_url)
 
     def check_errors(self):
         if self.PASSWD_PATTERN in self.data:
@@ -213,3 +229,19 @@ class UlozTo(SimpleHoster):
             self.fail(_("Server error, file not downloadable"))
 
         return SimpleHoster.check_download(self)
+
+    def get_json_response(self, url, inputs):
+        self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With: XMLHttpRequest"])
+
+        res = self.load(url, post=inputs, ref=self.pyfile.url)
+        self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With:"])
+
+        if not res.startswith('{'):
+            self.retry(msg=_("Something went wrong"))
+
+        jsonres = json.loads(res)
+        if 'formErrorContent' in jsonres:
+            self.retry_captcha()
+
+        self.log_debug(url, res)
+        return jsonres

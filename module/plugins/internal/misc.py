@@ -19,8 +19,9 @@ import time
 import traceback
 import urllib
 import urlparse
-import xml.sax.saxutils  # @TODO: Remove in 0.4.10
 import zlib
+from htmlentitydefs import name2codepoint
+from email.header import decode_header as decode_rfc2047_header
 
 try:
     import simplejson as json
@@ -41,7 +42,7 @@ except ImportError:
 class misc(object):
     __name__ = "misc"
     __type__ = "plugin"
-    __version__ = "0.50"
+    __version__ = "0.64"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -65,8 +66,7 @@ class Config(object):
         :param value:
         :return:
         """
-        self.plugin.pyload.api.setConfigValue(
-            plugin or self.plugin.classname, option, value, section="plugin")
+        self.plugin.pyload.api.setConfigValue(plugin or self.plugin.classname, option, value, section="plugin")
 
     def get(self, option, default=None, plugin=None):
         """
@@ -76,13 +76,10 @@ class Config(object):
         :return:
         """
         try:
-            return self.plugin.pyload.config.getPlugin(
-                plugin or self.plugin.classname, option)
+            return self.plugin.pyload.config.getPlugin(plugin or self.plugin.classname, option)
 
         except KeyError:
-            self.plugin.log_debug(
-                "Config option `%s` not found, use default `%s`" %
-                (option, default))  # @TODO: Restore to `log_warning` in 0.4.10
+            self.plugin.log_debug("Config option `%s` not found, use default `%s`" % (option, default))  # @TODO: Restore to `log_warning` in 0.4.10
             return default
 
 
@@ -123,6 +120,7 @@ class DB(object):
         Delete entry in db
         """
         self.plugin.pyload.db.delStorage(self.plugin.classname, key)
+        self.plugin.pyload.db.commit()
 
 
 class Expose(object):
@@ -157,8 +155,7 @@ class Periodical(object):
         if interval is not None and self.set_interval(interval) is False:
             return False
         else:
-            self.cb = self.plugin.pyload.scheduler.addJob(
-                max(1, delay), self._task, [threaded], threaded=threaded)
+            self.cb = self.plugin.pyload.scheduler.addJob(max(1, delay), self._task, [threaded], threaded=threaded)
             return True
 
     def restart(self, *args, **kwargs):
@@ -242,6 +239,23 @@ def threaded(fn):
 
     return run
 
+def sign_string(message, pem_private, pem_passphrase="" , sign_algo="SHA384"):
+    """
+    Generate a signature for string using the `sign_algo` and `RSA` algorithms
+    """
+    from Crypto.PublicKey import RSA
+    from Crypto.Signature import PKCS1_v1_5
+    from binascii import b2a_hex
+
+    if sign_algo not in ("MD5", "SHA1", "SHA256", "SHA384", "SHA512"):
+        raise ValueError("Unsupported Signing algorithm")
+
+
+    priv_key = RSA.importKey(pem_private, passphrase=pem_passphrase)
+    signer = PKCS1_v1_5.new(priv_key)
+    digest = getattr(__import__('Crypto.Hash', fromlist=[sign_algo]), sign_algo).new()
+    digest.update(message)
+    return b2a_hex(signer.sign(digest))
 
 def format_time(value):
     dt = datetime.datetime(1, 1, 1) + \
@@ -301,7 +315,7 @@ def fsbsize(path):
     """
     Get optimal file system buffer size (in bytes) for I/O calls
     """
-    path = encode(path)
+    path = fs_encode(path)
 
     if os.name == "nt":
         import ctypes
@@ -310,8 +324,7 @@ def fsbsize(path):
         cluster_sectors, sector_size = ctypes.c_longlong(0)
 
         ctypes.windll.kernel32.GetDiskFreeSpaceW(ctypes.c_wchar_p(drive),
-                                                 ctypes.pointer(
-                                                     cluster_sectors),
+                                                 ctypes.pointer(cluster_sectors),
                                                  ctypes.pointer(sector_size),
                                                  None,
                                                  None)
@@ -340,9 +353,30 @@ def has_method(obj, name):
 
 def html_unescape(text):
     """
-    Removes HTML or XML character references and entities from a text string
+    Decode HTML or XML escape character references and entities from a text string
     """
-    return xml.sax.saxutils.unescape(text)
+    def fixup(m):
+        text = m.group(0)
+        if text[:2] == "&#":
+            # character reference
+            try:
+                if text[:3] == "&#x":
+                    return unichr(int(text[3:-1], 16))
+                else:
+                    return unichr(int(text[2:-1]))
+            except ValueError:
+                pass
+        else:
+            # named entity
+            try:
+                name = text[1:-1]
+                text = unichr(name2codepoint[name])
+            except KeyError:
+                pass
+
+        return text # leave as is
+
+    return re.sub("&#?\w+;", fixup, text)
     #@TODO: Replace in 0.4.10 with:
     # h = HTMLParser.HTMLParser()
     # return h.unescape(text)
@@ -354,13 +388,14 @@ def isiterable(obj):
     """
     return hasattr(obj, "__iter__")
 
-
 def get_console_encoding(enc):
     if os.name == "nt":
         if enc == "cp65001":  #: aka UTF-8
-            enc = "cp850"
-            # print("WARNING: Windows codepage 65001 (UTF-8) is not supported,
-            # used `%s` instead") % enc
+            enc = "utf8"
+
+        elif enc is None:  #: piped
+            enc = "iso-8859-1"
+
     else:
         enc = "utf8"
 
@@ -379,21 +414,13 @@ def decode(value, encoding=None, errors='strict'):
     Encoded string (default to own system encoding) -> unicode string
     """
     if isinstance(value, str):
-        res = unicode(
-            value, encoding or get_console_encoding(
-                sys.stdout.encoding), errors)
+        res = unicode(value, encoding or get_console_encoding(sys.stdout.encoding), errors)
 
     elif isinstance(value, unicode):
         res = value
 
     else:
         res = unicode(value)
-
-    # Hotfix UnicodeDecodeError
-    try:
-        str(res)
-    except UnicodeEncodeError:
-        return normalize(res)
 
     return res
 
@@ -422,21 +449,33 @@ def encode(value, encoding='utf-8', errors='backslashreplace'):
     return res
 
 
-def exists(path):
-    path = encode(path)
+def rfc2047_dec(value):
+    def decode_chunk(m):
+        data, enc = decode_rfc2047_header(m.group(0))[0]
+        try:
+            res = data.decode(enc)
+        except (LookupError, UnicodeEncodeError):
+            res = m.group(0)
 
-    if os.path.exists(path):
-        if os.name == "nt":
-            dir, name = os.path.split(path.rstrip(os.sep))
-            return name.upper() in map(str.upper, os.listdir(dir))
+        return res
+
+    return re.sub(r'=\?([^?]+)\?([QB])\?([^?]*)\?=', decode_chunk, value, re.I)
+
+
+def exists(path):
+    path = fs_encode(path)
+
+    if os.name == "nt":
+        if path.startswith("\\\\"):
+            return os.path.exists('\\\\?\\UNC\\' + path[2:])
         else:
-            return True
+            return os.path.exists('\\\\?\\' + os.path.normpath(os.path.join(os.getcwd(), path)))
     else:
-        return False
+        return os.path.exists(path)
 
 
 def remove(path, trash=True):
-    path = encode(path)
+    path = fs_encode(path)
 
     if not exists(path):
         return
@@ -456,7 +495,7 @@ def fsjoin(*args):
     Like os.path.join, but encoding aware
     (for safe-joining see `safejoin`)
     """
-    return encode(os.path.join(*args))
+    return fs_encode(os.path.join(*args))
 
 
 def remove_chars(value, repl):
@@ -480,15 +519,16 @@ def fixurl(url, unquote=None):
     url = urllib.unquote(url)
 
     if unquote is None:
-        unquote = url is old
+        unquote = url == old
 
     url = decode(url)
-    try:
-        url = url.decode('unicode-escape')
-    except UnicodeDecodeError:
-        pass
+
+    #: 'unicode-escape' that work with unicode strings too
+    url = re.sub(r'\\[uU](\d{4})', lambda x: unichr(int(x.group(1))), url)
 
     url = html_unescape(url)
+
+    #: '//' becomes '/'
     url = re.sub(r'(?<!:)/{2,}', '/', url).strip().lstrip('.')
 
     if not unquote:
@@ -506,6 +546,22 @@ def truncate(name, length):
     return "%s~%s" % (name[:trunc * 2], name[-trunc:])
 
 
+if sys.getfilesystemencoding().startswith('ANSI'):
+    """
+     Use fs_encode before accesing files on disk,
+     it will encode the string properly
+    """
+    def fs_encode(value):
+        try:
+            value = decode(value)
+            value = value.encode('utf-8')
+        finally:
+            return value
+
+else:
+    fs_encode = decode
+
+
 #@TODO: Recheck in 0.4.10
 def safepath(value):
     """
@@ -516,8 +572,7 @@ def safepath(value):
     else:
         unt = ""
     drive, filename = os.path.splitdrive(value)
-    filename = os.path.join(os.sep if os.path.isabs(
-        filename) else "", *map(safename, filename.split(os.sep)))
+    filename = os.path.join(os.sep if os.path.isabs(filename) else "", *map(safename, filename.split(os.sep)))
     path = unt + drive + filename
 
     try:
@@ -547,20 +602,40 @@ def safename(value):
     """
     Remove invalid characters
     """
-    repl = '<>:"/\\|?*' if os.name == "nt" else '\0/\\"'
+    # repl = '<>:"/\\|?*' if os.name == "nt" else '\0/\\"'
+    repl = '<>:"/\\|?*\0'
     name = remove_chars(value, repl)
     return name
 
 
 def parse_name(value, safechar=True):
-    path  = fixurl(encode(value, 'ascii', 'replace'), unquote=False)
+    path = urllib.unquote(decode(value))
+
+    try:
+        path = path.encode('latin1').decode('utf8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+
+    #: 'unicode-escape' that work with unicode strings too
+    path = re.sub(r'\\[uU](\d{4})', lambda x: unichr(int(x.group(1))), path)
+
+    #: Decode HTML escape
+    path = html_unescape(path)
+
+    #: Decode rfc2047
+    path = rfc2047_dec(path)
+
+    #: Remove redundant '/'
+    path = re.sub(r'(?<!:)/{2,}', '/', path).strip().lstrip('.')
     path = path.replace('?', '_') # ? is bad for filenames
+
     url_p = urlparse.urlparse(path.rstrip('/'))
     name = (url_p.path.split('/')[-1] or
             url_p.query.split('=', 1)[::-1][0].split('&', 1)[0] or
             url_p.netloc.split('.', 1)[0])
 
-    name = urllib.unquote(name)
+    name = os.path.basename(name)
+
     return safename(name) if safechar else name
 
 
@@ -607,8 +682,7 @@ def str2int(value):
     ones = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
             "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
             "sixteen", "seventeen", "eighteen", "nineteen")
-    tens = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
-            "eighty", "ninety")
+    tens = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
 
     o_tuple = [(w, i) for i, w in enumerate(ones)]
     t_tuple = [(w, i * 10) for i, w in enumerate(tens)]
@@ -629,8 +703,7 @@ def parse_time(value):
     else:
         _re = re.compile(r'(\d+| (?:this|an?) )\s*(hr|hour|min|sec|)', re.I)
         seconds = sum((int(v) if v.strip() not in ("this", "a", "an") else 1) *
-                      {'hr': 3600, 'hour': 3600, 'min': 60,
-                          'sec': 1, '': 1}[u.lower()]
+                      {'hr': 3600, 'hour': 3600, 'min': 60, 'sec': 1, '': 1}[u.lower()]
                       for v, u in _re.findall(value))
     return seconds
 
@@ -663,7 +736,7 @@ def check_prog(command):
 
 
 def isexecutable(filename):
-    file = encode(filename)
+    file = fs_encode(filename)
     return os.path.isfile(file) and os.access(file, os.X_OK)
 
 
@@ -686,7 +759,7 @@ def which(filename):
 
 def format_exc(frame=None):
     """
-    Format call-stack and display exception information (if availible)
+    Format call-stack and display exception information (if available)
     """
     exc_info = sys.exc_info()
     exc_desc = u""
@@ -701,11 +774,7 @@ def format_exc(frame=None):
         if callstack[-1][0] == exception_callstack[0][0]:
             callstack = callstack[:-1]
             callstack.extend(exception_callstack)
-            exc_desc = decode(
-                "".join(
-                    traceback.format_exception_only(
-                        exc_info[0],
-                        exc_info[1])))
+            exc_desc = decode("".join(traceback.format_exception_only(exc_info[0], exc_info[1])))
 
     msg = u"Traceback (most recent call last):\n"
     msg += decode("".join(traceback.format_list(callstack)))
@@ -716,8 +785,7 @@ def format_exc(frame=None):
 
 def seconds_to_nexthour(strict=False):
     now = datetime.datetime.today()
-    nexthour = now.replace(minute=0 if strict else 1,
-                           second=0, microsecond=0) + datetime.timedelta(hours=1)
+    nexthour = now.replace(minute=0 if strict else 1, second=0, microsecond=0) + datetime.timedelta(hours=1)
     return (nexthour - now).seconds
 
 
@@ -727,12 +795,25 @@ def seconds_to_midnight(utc=None, strict=False):
     else:
         now = datetime.datetime.today()
 
-    midnight = now.replace(hour=0,
-                           minute=0 if strict else 1,
-                           second=0,
-                           microsecond=0) + datetime.timedelta(days=1)
+    midnight = now.replace(hour=0, minute=0 if strict else 1, second=0, microsecond=0) + datetime.timedelta(days=1)
 
     return (midnight - now).seconds
+
+
+def search_pattern(pattern, value, flags=0):
+    try:
+        pattern, reflags = pattern
+
+    except ValueError:
+        reflags = 0
+
+    except TypeError:
+        return None
+
+    try:
+        return re.search(pattern, value, reflags | flags)
+    except TypeError:
+        return None
 
 
 def replace_patterns(value, rules):
@@ -750,8 +831,7 @@ def replace_patterns(value, rules):
 
 
 #@TODO: Remove in 0.4.10 and fix exp in CookieJar.setCookie
-def set_cookie(cj, domain, name, value, path='/',
-               exp=time.time() + 180 * 24 * 3600):
+def set_cookie(cj, domain, name, value, path='/', exp=time.time() + 180 * 24 * 3600):
     args = map(encode, [domain, name, value, path]) + [int(exp)]
     return cj.setCookie(*args)
 
@@ -786,25 +866,21 @@ def parse_html_header(header):
 
 
 def parse_html_tag_attr_value(attr_name, tag):
-    m = re.search(
-        r'%s\s*=\s*(["\']?)((?<=")[^"]+|(?<=\')[^\']+|[^>\s"\'][^>\s]*)\1' %
-        attr_name, tag, re.I)
+    m = re.search(r'%s\s*=\s*(["\']?)((?<=")[^"]+|(?<=\')[^\']+|[^>\s"\'][^>\s]*)\1' % attr_name, tag, re.I)
     return m.group(2) if m else None
 
 
-def parse_html_form(attr_str, html, input_names={}):
-    for form in re.finditer(r'(?P<TAG><form[^>]*%s.*?>)(?P<CONTENT>.*?)</?(form|body|html).*?>' % attr_str,
-                            html, re.I | re.S):
+def parse_html_form(attr_filter, html, input_names={}):
+    attr_str = "" if callable(attr_filter) else attr_filter
+    for form in re.finditer(r'(?P<TAG><form[^>]*%s.*?>)(?P<CONTENT>.*?)</?(form|body|html).*?>' % attr_str, html, re.I | re.S):
+        if callable(attr_filter) and not attr_filter(form.group('TAG')):
+            continue
+
         inputs = {}
         action = parse_html_tag_attr_value("action", form.group('TAG'))
 
         for inputtag in re.finditer(r'(<(input|textarea).*?>)([^<]*(?=</\2)|)',
-                                    re.sub(
-                                        re.compile(
-                                            r'<!--.+?-->',
-                                            re.I | re.S),
-                                        "",
-                                        form.group('CONTENT')),
+                                    re.sub(re.compile(r'<!--.+?-->', re.I | re.S), "", form.group('CONTENT')),
                                     re.I | re.S):
 
             name = parse_html_tag_attr_value("name", inputtag.group(1))
@@ -851,10 +927,10 @@ def renice(pid, value):
         return
 
     try:
-        subprocess.Popen(["renice", str(value), str(pid)],
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE,
-                         bufsize=-1)
+        Popen(["renice", str(value), str(pid)],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              bufsize=-1)
     except Exception:
         pass
 
@@ -871,7 +947,7 @@ def forward(source, destination):
 
 
 def compute_checksum(filename, hashtype):
-    file = encode(filename)
+    file = fs_encode(filename)
 
     if not exists(file):
         return None
@@ -918,8 +994,7 @@ def copy_tree(src, dst, overwrite=False, preserve_metadata=False):
                 shutil.copystat(src_dir, dst_dir)
 
         elif pmode:
-            if overwrite or overwrite is None and mtime(
-                    src_dir) > mtime(dst_dir):
+            if overwrite or overwrite is None and mtime(src_dir) > mtime(dst_dir):
                 shutil.copystat(src_dir, dst_dir)
 
         for filename in files:
@@ -927,8 +1002,7 @@ def copy_tree(src, dst, overwrite=False, preserve_metadata=False):
             dst_file = fsjoin(dst_dir, filename)
 
             if exists(dst_file):
-                if overwrite or overwrite is None and mtime(
-                        src_file) > mtime(dst_file):
+                if overwrite or overwrite is None and mtime(src_file) > mtime(dst_file):
                     os.remove(dst_file)
                 else:
                     continue
@@ -958,8 +1032,7 @@ def move_tree(src, dst, overwrite=False):
             dst_file = fsjoin(dst_dir, filename)
 
             if exists(dst_file):
-                if overwrite or overwrite is None and mtime(
-                        src_file) > mtime(dst_file):
+                if overwrite or overwrite is None and mtime(src_file) > mtime(dst_file):
                     os.remove(dst_file)
                 else:
                     continue
@@ -973,3 +1046,145 @@ def move_tree(src, dst, overwrite=False):
             os.rmdir(src_dir)
         except OSError:
             pass
+
+
+"""
+subprocess.Popen doesn't support unicode on Windows
+## https://bugs.python.org/issue19264
+"""
+if os.name != "nt":
+    from subprocess import Popen
+
+else:
+    import ctypes
+    import subprocess
+    import _subprocess
+    from ctypes import byref, windll, c_char_p, c_wchar_p, c_void_p, Structure, sizeof, c_wchar, WinError
+    from ctypes.wintypes import BYTE, WORD, LPWSTR, BOOL, DWORD, LPVOID, HANDLE
+
+    ##
+    ## Types
+    ##
+    CREATE_UNICODE_ENVIRONMENT = 0x00000400
+    LPCTSTR = c_char_p
+    LPTSTR = c_wchar_p
+    LPSECURITY_ATTRIBUTES = c_void_p
+    LPBYTE  = ctypes.POINTER(BYTE)
+
+    class STARTUPINFOW(Structure):
+        _fields_ = [
+            ("cb",              DWORD),
+            ("lpReserved",      LPWSTR),
+            ("lpDesktop",       LPWSTR),
+            ("lpTitle",         LPWSTR),
+            ("dwX",             DWORD),
+            ("dwY",             DWORD),
+            ("dwXSize",         DWORD),
+            ("dwYSize",         DWORD),
+            ("dwXCountChars",   DWORD),
+            ("dwYCountChars",   DWORD),
+            ("dwFillAtrribute", DWORD),
+            ("dwFlags",         DWORD),
+            ("wShowWindow",     WORD),
+            ("cbReserved2",     WORD),
+            ("lpReserved2",     LPBYTE),
+            ("hStdInput",       HANDLE),
+            ("hStdOutput",      HANDLE),
+            ("hStdError",       HANDLE),
+        ]
+
+    LPSTARTUPINFOW = ctypes.POINTER(STARTUPINFOW)
+
+    class PROCESS_INFORMATION(Structure):
+        _fields_ = [
+            ("hProcess",         HANDLE),
+            ("hThread",          HANDLE),
+            ("dwProcessId",      DWORD),
+            ("dwThreadId",       DWORD),
+        ]
+
+    LPPROCESS_INFORMATION = ctypes.POINTER(PROCESS_INFORMATION)
+
+    class DUMMY_HANDLE(ctypes.c_void_p):
+        def __init__(self, *args, **kwargs):
+            super(DUMMY_HANDLE, self).__init__(*args, **kwargs)
+            self.closed = False
+        def Close(self):
+            if not self.closed:
+                windll.kernel32.CloseHandle(self)
+                self.closed = True
+        def __int__(self):
+            return self.value
+
+
+    CreateProcessW = windll.kernel32.CreateProcessW
+    CreateProcessW.argtypes = [LPCTSTR, LPTSTR, LPSECURITY_ATTRIBUTES,
+                               LPSECURITY_ATTRIBUTES, BOOL, DWORD, LPVOID, LPCTSTR,
+                               LPSTARTUPINFOW, LPPROCESS_INFORMATION,]
+    CreateProcessW.restype = BOOL
+
+    def CreateProcess(executable, args, _p_attr, _t_attr, inherit_handles, creation_flags, env, cwd, startup_info):
+        """
+        Create a process supporting unicode executable and args for win32
+        Python implementation of CreateProcess using CreateProcessW for Win32
+        """
+        si = STARTUPINFOW(
+            dwFlags=startup_info.dwFlags,
+            wShowWindow=startup_info.wShowWindow,
+            cb=sizeof(STARTUPINFOW),
+            hStdInput=0 if startup_info.hStdInput is None else int(startup_info.hStdInput),
+            hStdOutput=0 if startup_info.hStdOutput is None else int(startup_info.hStdOutput),
+            hStdError=0 if startup_info.hStdError is None else int(startup_info.hStdError),
+        )
+
+        wenv = None
+        if env is not None:
+            ## LPCWSTR seems to be c_wchar_p, so let's say CWSTR is c_wchar
+            env = (u"".join([u"%s=%s\0" % (k, v)
+                             for k, v in env.items()])) + u"\0"
+            wenv = (c_wchar * len(env))()
+            wenv.value = env
+
+        pi = PROCESS_INFORMATION()
+        creation_flags |= CREATE_UNICODE_ENVIRONMENT
+
+        if CreateProcessW(executable, args, None, None, inherit_handles, creation_flags,
+                          wenv, cwd, byref(si), byref(pi)):
+            return (DUMMY_HANDLE(pi.hProcess), DUMMY_HANDLE(pi.hThread), pi.dwProcessId, pi.dwThreadId)
+        raise WinError()
+
+
+    class Popen(subprocess.Popen):
+        """
+        This supersedes Popen and corrects a bug in cPython implementation
+        """
+        def _execute_child(self, args, executable, preexec_fn, close_fds,
+                           cwd, env, universal_newlines,
+                           startupinfo, creationflags, shell, to_close,
+                           p2cread, p2cwrite,
+                           c2pread, c2pwrite,
+                           errread, errwrite):
+
+            if not isinstance(args, subprocess.types.StringTypes):
+                args = subprocess.list2cmdline(args)
+
+            if startupinfo is None:
+                startupinfo = subprocess.STARTUPINFO()
+            if shell:
+                startupinfo.dwFlags |= _subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = _subprocess.SW_HIDE
+                comspec = os.environ.get("COMSPEC", u"cmd.exe")
+                args = u'%s /c "%s"' % (comspec, args)
+                if _subprocess.GetVersion() >= 0x80000000 or os.path.basename(comspec).lower() == "command.com":
+                    w9xpopen = self._find_w9xpopen()
+                    args = u'"%s" %s' % (w9xpopen, args)
+                    creationflags |= _subprocess.CREATE_NEW_CONSOLE
+
+            super(Popen, self)._execute_child(args, executable, preexec_fn, close_fds,
+                                              cwd, env, universal_newlines,
+                                              startupinfo, creationflags, False, to_close,
+                                              p2cread, p2cwrite,
+                                              c2pread, c2pwrite,
+                                              errread, errwrite)
+
+    _subprocess.CreateProcess = CreateProcess

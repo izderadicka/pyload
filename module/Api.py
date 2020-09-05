@@ -17,7 +17,6 @@
     @author: RaNaN
 """
 
-from base64 import standard_b64encode
 from os.path import join
 from time import time
 import re
@@ -25,6 +24,7 @@ import re
 from PyFile import PyFile
 from utils import freeSpace, compare_time
 from common.packagetools import parseNames
+from common.json_layer import json
 from network.RequestFactory import getURL
 from remote import activated
 
@@ -321,7 +321,8 @@ class Api(Iface):
         else:
             folder = ""
 
-        folder = folder.replace("http://", "").replace(":", "").replace("/", "_").replace("\\", "_")
+        folder = folder.replace("http://", "").replace("https://", "").rstrip("/") \
+            .replace(":", "").replace("/", "_").replace("\\", "_")
 
         pid = self.core.files.addPackage(name, folder, dest)
 
@@ -805,7 +806,7 @@ class Api(Iface):
         if task:
             task.setWatingForUser(exclusive=exclusive)
             data, type, result = task.getCaptcha()
-            t = CaptchaTask(int(task.id), standard_b64encode(data), type, result)
+            t = CaptchaTask(int(task.id), json.dumps(data), type, result)
             return t
         else:
             return CaptchaTask(-1)

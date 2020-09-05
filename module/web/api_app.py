@@ -31,28 +31,48 @@ def call_api(func, args=""):
     response.headers.replace("Content-type", "application/json")
     response.headers.append("Cache-Control", "no-cache, must-revalidate")
 
-    s = request.environ.get('beaker.session')
-    if 'session' in request.POST:
-        s = s.get_by_id(request.POST['session'])
+    if 'u' in request.POST and 'p' in request.POST:
+        info = PYLOAD.checkAuth(request.POST['u'], request.POST['p'])
+        if info:
+            if not PYLOAD.isAuthorized(func, {"role": info["role"], "permission": info["permission"]}):
+                response.status = 401
+                response.content_type = 'application/json'
+                return json.dumps({'error': "Unauthorized"})
 
-    if not s or not s.get("authenticated", False):
-        return HTTPError(403, json.dumps("Forbidden"))
+        else:
+            response.status = 403
+            response.content_type = 'application/json'
+            return json.dumps({'error': "Forbidden"})
 
-    if not PYLOAD.isAuthorized(func, {"role": s["role"], "permission": s["perms"]}):
-        return HTTPError(401, json.dumps("Unauthorized"))
+    else:
+        s = request.environ.get('beaker.session')
+        if 'session' in request.POST:
+            s = s.get_by_id(request.POST['session'])
+
+        if not s or not s.get("authenticated", False):
+            response.status = 403
+            response.content_type = 'application/json'
+            return json.dumps({'error': "Forbidden"})
+
+        if not PYLOAD.isAuthorized(func, {"role": s["role"], "permission": s["perms"]}):
+            response.status = 401
+            response.content_type = 'application/json'
+            return json.dumps({'error': "Unauthorized"})
 
     args = args.split("/")[1:]
     kwargs = {}
 
     for x, y in chain(request.GET.iteritems(), request.POST.iteritems()):
-        if x == "session": continue
+        if x in ("u", "p", "session"): continue
         kwargs[x] = unquote(y)
 
     try:
         return callApi(func, *args, **kwargs)
     except Exception, e:
         print_exc()
-        return HTTPError(500, json.dumps({"error": e.message, "traceback": format_exc()}))
+        response.status = 500
+        response.content_type = 'application/json'
+        return json.dumps({"error": e.message, "traceback": format_exc()})
 
 
 def callApi(func, *args, **kwargs):

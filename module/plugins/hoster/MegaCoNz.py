@@ -8,10 +8,11 @@ import struct
 
 import Crypto.Cipher.AES
 import Crypto.Util.Counter
+
 from module.network.HTTPRequest import BadHeader
 
 from ..internal.Hoster import Hoster
-from ..internal.misc import decode, encode, exists, fsjoin, json
+from ..internal.misc import decode, exists, fs_encode, fsjoin, json
 
 
 ############################ General errors ###################################
@@ -42,7 +43,8 @@ from ..internal.misc import decode, encode, exists, fsjoin, json
 # EREAD               (-21): Read failed
 # EAPPKEY             (-22): Invalid application key; request not processed
 # ESSL                (-23): SSL verification failed
-
+# EGOINGOVERQUOTA     (-24): Not enough quota
+# EMFAREQUIRED        (-26): Multi-factor authentication required
 
 class MegaCrypto(object):
 
@@ -86,6 +88,16 @@ class MegaCrypto(object):
         return cbc.encrypt(data)
 
     @staticmethod
+    def ecb_decrypt(data, key):
+        ecb = Crypto.Cipher.AES.new(MegaCrypto.a32_to_str(key), Crypto.Cipher.AES.MODE_ECB)
+        return ecb.decrypt(data)
+
+    @staticmethod
+    def ecb_encrypt(data, key):
+        ecb = Crypto.Cipher.AES.new(MegaCrypto.a32_to_str(key), Crypto.Cipher.AES.MODE_ECB)
+        return ecb.encrypt(data)
+
+    @staticmethod
     def get_cipher_key(key):
         """
         Construct the cipher key from the given data
@@ -117,17 +129,15 @@ class MegaCrypto(object):
         Decrypt an encrypted key ('k' member of a node)
         """
         data = MegaCrypto.base64_decode(data)
-        return sum((MegaCrypto.str_to_a32(MegaCrypto.cbc_decrypt(data[_i:_i + 16], key))
-                    for _i in range(0, len(data), 16)), ())
+        return MegaCrypto.str_to_a32(MegaCrypto.ecb_decrypt(data, key))
 
     @staticmethod
     def encrypt_key(data, key):
         """
         Encrypt a decrypted key
         """
-        data = MegaCrypto.base64_decode(data)
-        return sum((MegaCrypto.str_to_a32(MegaCrypto.cbc_encrypt(data[_i:_i + 16], key))
-                    for _i in range(0, len(data), 16)), ())
+        data = MegaCrypto.a32_to_str(data)
+        return MegaCrypto.str_to_a32(MegaCrypto.ecb_encrypt(data, key))
 
     @staticmethod
     def get_chunks(size):
@@ -204,15 +214,13 @@ class MegaClient(object):
 
         if hasattr(self.plugin, 'account'):
             if self.plugin.account:
-                mega_session_id = self.plugin.account.info[
-                    'data'].get('mega_session_id', None)
+                mega_session_id = self.plugin.account.info['data'].get('mega_session_id', None)
 
             else:
                 mega_session_id = None
 
         else:
-            mega_session_id = self.plugin.info[
-                'data'].get('mega_session_id', None)
+            mega_session_id = self.plugin.info['data'].get('mega_session_id', None)
 
         if mega_session_id:
             get_params['sid'] = mega_session_id
@@ -242,10 +250,10 @@ class MegaClient(object):
         if ecode in (9, 16, 21):
             self.plugin.offline()
 
-        elif ecode in (3, 13, 17, 18, 19):
+        elif ecode in (3, 13, 17, 18, 19, 24):
             self.plugin.temp_offline()
 
-        elif ecode in (1, 4, 6, 10, 15, 21):
+        elif ecode in (1, 4, 6, 10, 15):
             self.plugin.retry(max_tries=5, wait_time=30, reason=_("Error code: [%s]") % -ecode)
 
         else:
@@ -255,10 +263,10 @@ class MegaClient(object):
 class MegaCoNz(Hoster):
     __name__ = "MegaCoNz"
     __type__ = "hoster"
-    __version__ = "0.52"
+    __version__ = "0.55"
     __status__ = "testing"
 
-    __pattern__ = r'(https?://(?:www\.)?mega(\.co)?\.nz/|mega:|chrome:.+?)#(?P<TYPE>N|)!(?P<ID>[\w^_]+)!(?P<KEY>[\w\-,=]+)(?:###n=(?P<OWNER>[\w^_]+))?'
+    __pattern__ = r'(?:https?://(?:www\.)?mega(?:\.co)?\.nz/|mega:|chrome:.+?)(?:file/|#(?P<TYPE>N|)!)(?P<ID>[\w^_]+)[!#](?P<KEY>[\w\-,=]+)(?:###n=(?P<OWNER>[\w^_]+))?'
     __config__ = [("activated", "bool", "Activated", True)]
 
     __description__ = """Mega.co.nz hoster plugin"""
@@ -280,12 +288,12 @@ class MegaCoNz(Hoster):
         self.pyfile.setStatus("decrypting")
         self.pyfile.setProgress(0)
 
-        file_crypted = encode(self.last_download)
+        file_crypted = self.last_download
         file_decrypted = file_crypted.rsplit(self.FILE_SUFFIX)[0]
 
         try:
-            f = open(file_crypted, "rb")
-            df = open(file_decrypted, "wb")
+            f = open(fs_encode(file_crypted), "rb")
+            df = open(fs_encode(file_decrypted), "wb")
 
         except IOError, e:
             self.fail(e.message)
@@ -373,7 +381,7 @@ class MegaCoNz(Hoster):
     def process(self, pyfile):
         id = self.info['pattern']['ID']
         key = self.info['pattern']['KEY']
-        public = self.info['pattern']['TYPE'] == ""
+        public = self.info['pattern']['TYPE'] in ("", None)
         owner = self.info['pattern']['OWNER']
 
         if not public and not owner:
@@ -390,8 +398,7 @@ class MegaCoNz(Hoster):
             self.log_error(_("Invalid key length"))
             self.fail(_("Invalid key length"))
 
-        mega = MegaClient(self, self.info['pattern'][
-                          'OWNER'] or self.info['pattern']['ID'])
+        mega = MegaClient(self, self.info['pattern']['OWNER'] or self.info['pattern']['ID'])
 
         #: G is for requesting a download url
         #: This is similar to the calls in the mega js app, documentation is very bad

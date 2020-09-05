@@ -15,8 +15,9 @@ except ImportError:
             self.iterations = iterations
 
         def hexread(self, octets):
-            return b2a_hex(
-                pbkdf2(self.passphrase, self.salt, self.iterations, octets))
+            return b2a_hex(pbkdf2(self.passphrase, self.salt, self.iterations, octets))
+
+from module.network.RequestFactory import getURL as get_url
 
 from ..internal.Account import Account
 from ..internal.misc import json
@@ -25,53 +26,53 @@ from ..internal.misc import json
 class OboomCom(Account):
     __name__ = "OboomCom"
     __type__ = "account"
-    __version__ = "0.32"
+    __version__ = "0.34"
     __status__ = "testing"
 
     __description__ = """Oboom.com account plugin"""
     __license__ = "GPLv3"
-    __authors__ = [("stanley", "stanley.foerster@gmail.com")]
+    __authors__ = [("stanley", "stanley.foerster@gmail.com"),
+                   ("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
 
-    def load_account_data(self, user, password):
+    #: See https://www.oboom.com/api
+    API_URL = "https://%s.oboom.com/1/"
+
+    @classmethod
+    def api_respond(cls, subdomain, method, args={}):
+        return json.loads(get_url(cls.API_URL % subdomain + method,
+                                  post=args))
+
+    def grab_info(self, user, password, data):
         salt = password[::-1]
         pbkdf2 = PBKDF2(password, salt, 1000).hexread(16)
 
-        html = self.load("http://www.oboom.com/1/login",  # @TODO: Revert to `https` in 0.4.10
-                         get={'auth': user,
-                              'pass': pbkdf2})
-        result = json.loads(html)
+        res = self.api_respond("www", "login", {'auth': user,
+                                                'pass': pbkdf2})
 
-        if result[0] != 200:
-            self.log_warning(_("Failed to log in: %s") % result[1])
-            self.fail_login()
+        user_data = res[1]['user']
 
-        return result[1]
+        premium = user_data['premium'] != "null"
 
-    def grab_info(self, user, password, data):
-        account_data = self.load_account_data(user, password)
+        if user_data['premium_unix'] == "null":
+            validuntil = -1
 
-        userData = account_data['user']
-
-        premium = userData['premium'] != "null"
-
-        if userData['premium_unix'] == "null":
-            validUntil = -1
         else:
-            validUntil = float(userData['premium_unix'])
+            validuntil = float(user_data['premium_unix'])
 
-        traffic = userData['traffic']
+        trafficleft = user_data['traffic']['current']
 
-        # @TODO: Remove `/ 1024` in 0.4.10
-        trafficLeft = traffic['current'] / 1024
-        maxTraffic = traffic['max'] / 1024  # @TODO: Remove `/ 1024` in 0.4.10
-
-        session = account_data['session']
+        data['session'] = res[1]['session']
 
         return {'premium': premium,
-                'validuntil': validUntil,
-                'trafficleft': trafficLeft,
-                'maxtraffic': maxTraffic,
-                'session': session}
+                'validuntil': validuntil,
+                'trafficleft': trafficleft}
 
     def signin(self, user, password, data):
-        self.load_account_data(user, password)
+        salt = password[::-1]
+        pbkdf2 = PBKDF2(password, salt, 1000).hexread(16)
+
+        res = self.api_respond("www", "login", {'auth': user,
+                                                'pass': pbkdf2})
+
+        if res[0] != 200:
+            self.fail_login(res[1])

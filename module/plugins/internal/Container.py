@@ -6,13 +6,13 @@ import os
 import urlparse
 
 from .Crypter import Crypter
-from .misc import encode, exists
+from .misc import encode, exists, fs_encode, safejoin
 
 
 class Container(Crypter):
     __name__ = "Container"
     __type__ = "container"
-    __version__ = "0.13"
+    __version__ = "0.15"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -44,7 +44,7 @@ class Container(Crypter):
         self._create_packages()
 
     def _delete_tmpfile(self):
-        if self.pyfile.name.startswith("tmp_"):
+        if os.path.basename(self.pyfile.name).startswith("tmp_"):
             self.remove(self.pyfile.url, trash=False)
 
     def _make_tmpfile(self):
@@ -58,14 +58,11 @@ class Container(Crypter):
             content = self.load(self.pyfile.url)
 
             self.pyfile.name = "tmp_" + self.pyfile.name
-            self.pyfile.url = os.path.join(
-                self.pyload.config.get(
-                    'general',
-                    'download_folder'),
-                self.pyfile.name)
+            self.pyfile.url = safejoin(self.pyload.config.get('general', 'download_folder'),
+                                       self.pyfile.name)
 
             try:
-                with open(self.pyfile.url, "wb") as f:
+                with open(fs_encode(self.pyfile.url), "wb") as f:
                     f.write(encode(content))
 
             except IOError, e:

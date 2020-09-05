@@ -3,7 +3,7 @@
 import pycurl
 from module.network.HTTPRequest import BadHeader
 
-from ..internal.misc import encode, json, reduce
+from ..internal.misc import decode, json, reduce
 from ..internal.MultiAccount import MultiAccount
 
 
@@ -14,7 +14,7 @@ def args(**kwargs):
 class MegaDebridEu(MultiAccount):
     __name__ = "MegaDebridEu"
     __type__ = "account"
-    __version__ = "0.36"
+    __version__ = "0.37"
     __status__ = "testing"
 
     __config__ = [("mh_mode", "all;listed;unlisted", "Filter hosters to use", "all"),
@@ -35,7 +35,7 @@ class MegaDebridEu(MultiAccount):
         get['action'] = action
 
         # Better use pyLoad User-Agent so we don't get blocked
-        self.req.http.c.setopt(pycurl.USERAGENT, encode("pyLoad/%s" % self.pyload.version))
+        self.req.http.c.setopt(pycurl.USERAGENT, decode("pyLoad/%s" % self.pyload.version))
 
         json_data = self.load(self.API_URL, get=get, post=post)
 
@@ -55,7 +55,8 @@ class MegaDebridEu(MultiAccount):
 
         else:
             if res['response_code'] == "ok":
-                hosters = reduce((lambda x, y: x + y), [_h['domains'] for _h in res['hosters']])
+                hosters = reduce((lambda x, y: x + y), [_h['domains'] for _h in res['hosters']
+                                                        if 'domains' in _h and isinstance(_h['domains'], list)])
 
             else:
                 self.log_error(_("Unable to retrieve hoster list: %s") % res['response_text'])

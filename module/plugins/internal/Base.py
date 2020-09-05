@@ -6,8 +6,8 @@ import time
 import urlparse
 
 from .Captcha import Captcha
-from .misc import (decode, encode, fixurl, format_size, format_time,
-                   parse_html_form, parse_name, replace_patterns)
+from .misc import (
+    decode, encode, fixurl, format_exc, format_size, format_time, parse_html_form, parse_name, replace_patterns)
 from .Plugin import Abort, Fail, Plugin, Reconnect, Retry, Skip
 
 
@@ -26,7 +26,7 @@ def parse_fileInfo(klass, url="", html=""):
 class Base(Plugin):
     __name__ = "Base"
     __type__ = "base"
-    __version__ = "0.33"
+    __version__ = "0.39"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -98,22 +98,23 @@ class Base(Plugin):
         self.init_base()
         self.init()
 
-    def _log(self, level, plugintype, pluginname, messages):
+    def _log(self, level, plugintype, pluginname, messages, tbframe=None):
         log = getattr(self.pyload.log, level)
         msg = u" | ".join(decode(a).strip() for a in messages if a)
 
         #: Hide any user/password
         try:
-            msg = msg.replace(
-                self.account.user, self.account.user[:3] + "*******")
+            msg = msg.replace(self.account.user, self.account.user[:3] + "*******")
         except Exception:
             pass
 
         try:
-            msg = msg.replace(
-                self.account.info['login']['password'], "**********")
+            msg = msg.replace(self.account.info['login']['password'], "**********")
         except Exception:
             pass
+
+        if tbframe:
+            msg += "\n" + format_exc(tbframe)
 
         log("%(plugintype)s %(pluginname)s[%(id)s]: %(msg)s" %
             {'plugintype': plugintype.upper(),
@@ -152,8 +153,7 @@ class Base(Plugin):
             pass
 
         if self.account:
-            self.req = self.pyload.requestFactory.getRequest(
-                self.classname, self.account.user)
+            self.req = self.pyload.requestFactory.getRequest(self.classname, self.account.user)
             # @NOTE: Avoid one unnecessary get_info call by `self.account.premium` here
             self.premium = self.account.info['data']['premium']
         else:
@@ -169,8 +169,7 @@ class Base(Plugin):
 
     def load_account(self):
         if not self.account:
-            self.account = self.pyload.accountManager.getAccountPlugin(
-                self.classname)
+            self.account = self.pyload.accountManager.getAccountPlugin(self.classname)
 
         if not self.account:
             self.account = False
@@ -202,9 +201,7 @@ class Base(Plugin):
             size = self.pyfile.size
 
         if size:
-            self.log_info(
-                _("Link size: %s (%s bytes)") %
-                (format_size(size), size))
+            self.log_info(_("Link size: %s (%s bytes)") % (format_size(size), size))
         else:
             self.log_info(_("Link size: N/D"))
 
@@ -223,7 +220,7 @@ class Base(Plugin):
         self.log_info(_("Grabbing link info..."))
 
         old_info = dict(self.info)
-        new_info = self.get_info(self.pyfile.url, self.data)
+        new_info = self.get_info(replace_patterns(self.pyfile.url, self.URL_REPLACEMENTS), self.data)
 
         self.info.update(new_info)
 
@@ -334,16 +331,16 @@ class Base(Plugin):
         if seconds is not None:
             self.set_wait(seconds)
 
-        if reconnect is None:
-            reconnect = (seconds > self.config.get('max_wait', 10) * 60)
-
-        self.set_reconnect(reconnect)
-
         wait_time = self.pyfile.waitUntil - time.time()
 
         if wait_time < 1:
             self.log_warning(_("Invalid wait time interval"))
             return
+
+        if reconnect is None:
+            reconnect = (wait_time > self.config.get('max_wait', 10) * 60)
+
+        self.set_reconnect(reconnect)
 
         self.waiting = True
 
@@ -396,14 +393,12 @@ class Base(Plugin):
         if msg:
             self.pyfile.error = msg
         else:
-            msg = self.pyfile.error or self.info.get(
-                'error') or self.pyfile.getStatusName()
+            msg = self.pyfile.error or self.info.get('error') or self.pyfile.getStatusName()
 
-        raise Fail(encode(msg))  # @TODO: Remove `encode` in 0.4.10
+        raise Fail(decode(msg))  # @TODO: Remove `encode` in 0.4.10
 
     def error(self, msg="", type=_("Parse")):
-        type = _("%s error") % type.strip(
-        ).capitalize() if type else _("Unknown")
+        type = _("%s error") % type.strip().capitalize() if type else _("Unknown")
         msg = _("%(type)s: %(msg)s | Plugin may be out of date"
                 % {'type': type, 'msg': msg or self.pyfile.error})
 
@@ -434,22 +429,19 @@ class Base(Plugin):
 
     def restart(self, msg="", premium=True):
         if not msg:
-            msg = _("Restart plugin") if premium else _(
-                "Fallback to free processing")
+            msg = _("Restart plugin") if premium else _("Fallback to free processing")
 
         if not premium:
             if self.premium:
                 self.restart_free = True
             else:
-                self.fail(
-                    "%s | %s" %
-                    (msg, _("Url was already processed as free")))
+                self.fail("%s | %s" % (msg, _("Url was already processed as free")))
 
         self.req.clearCookies()
 
         raise Retry(encode(msg))  # @TODO: Remove `encode` in 0.4.10
 
-    def retry(self, attemps=5, wait=1, msg=""):
+    def retry(self, attemps=5, wait=1, msg="", msgfail=_("Max retries reached")):
         """
         Retries and begin again from the beginning
 
@@ -468,7 +460,7 @@ class Base(Plugin):
             self.retries[id] = 0
 
         if 0 < attemps <= self.retries[id]:
-            self.fail(msg or _("Max retries reached"))
+            self.fail(msgfail)
 
         self.retries[id] += 1
 
@@ -476,21 +468,19 @@ class Base(Plugin):
 
         raise Retry(encode(msg))  # @TODO: Remove `encode` in 0.4.10
 
-    def retry_captcha(self, attemps=10, wait=1,
-                      msg=_("Max captcha retries reached")):
-        self.captcha.invalid()
-        self.retry(attemps, wait, msg)
+    def retry_captcha(self, attemps=10, wait=1, msg="", msgfail=_("Max captcha retries reached")):
+        self.captcha.invalid(msg)
+        self.retry(attemps, wait, msg=_("Retry Captcha"), msgfail=msgfail)
 
-    def fixurl(self, url, baseurl=None, unquote=True):
-        url = fixurl(url, unquote=True)
-        baseurl = fixurl(baseurl or self.pyfile.url, unquote=True)
+    def fixurl(self, url, baseurl=None):
+        baseurl = baseurl or self.pyfile.url
 
         if not urlparse.urlparse(url).scheme:
             url_p = urlparse.urlparse(baseurl)
             baseurl = "%s://%s" % (url_p.scheme, url_p.netloc)
             url = urlparse.urljoin(baseurl, url)
 
-        return fixurl(url, unquote)
+        return url
 
     def load(self, *args, **kwargs):
         self.check_status()

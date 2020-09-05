@@ -12,7 +12,7 @@ from ..internal.misc import json
 class Keep2ShareCc(SimpleHoster):
     __name__ = "Keep2ShareCc"
     __type__ = "hoster"
-    __version__ = "0.43"
+    __version__ = "0.45"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:www\.)?(keep2share|k2s|keep2s)\.cc/file/(?P<ID>\w+)'
@@ -33,7 +33,7 @@ class Keep2ShareCc(SimpleHoster):
     URL_REPLACEMENTS = [(__pattern__ + ".*", "https://k2s.cc/file/\g<ID>")]
 
     API_URL = "https://keep2share.cc/api/v2/"
-    #: See https://github.com/keep2share/api
+    #: See https://keep2share.github.io/api/ https://github.com/keep2share/api
 
     @classmethod
     def api_response(cls, method, **kwargs):
@@ -126,13 +126,13 @@ class Keep2ShareCc(SimpleHoster):
                                               captcha_response=None)
 
                 if json_data['code'] == 200:
-                    self.link = json_data['url']
+                    self.download(json_data['url'])
 
             else:
                 raise
 
         else:
-            self.link = json_data['url']
+            self.download(json_data['url'])
 
     def handle_premium(self, pyfile):
         file_id = self.info['pattern']['ID']

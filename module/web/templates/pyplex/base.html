@@ -38,6 +38,51 @@
 </head>
 <body>
 
+{% macro selected(name, right=False) -%}
+  {% if name in url -%}class="{% if right -%}right {% endif %}selected"{%- endif %}
+  {% if not name in url and right -%}class="right"{%- endif %}
+{%- endmacro %}
+
+<nav id="sticky-nav" class="navbar navbar-inverse navoben navbar-fixed-top hidden-sm hidden-xs" style="display: none; border-bottom: 1px solid rgba(255,255,255,.15); box-shadow: 0 1px 6px 0 rgba(111,114,125,0.28); min-height: 45px;">
+  <ul  class="nav navbar-nav">
+    <li ondragstart="return false;" {{selected('home')}}>
+      <a href="{{'/home/'|url}}" title="{{_('Home')}}"><span class="glyphicon glyphicon-home"></span></a>
+    </li>
+    <li ondragstart="return false;" {{selected('queue')}}>
+      <a href="{{'/queue/'|url}}" title="{{_('Queue')}}"><span class="glyphicon glyphicon-tasks"></span></a>
+    </li>
+    <li ondragstart="return false;" {{selected('collector')}}>
+      <a href="{{'/collector/'|url}}" title="{{_('Collector')}}"><span class="glyphicon glyphicon-magnet"></span></a>
+    </li>
+    <li ondragstart="return false;" {{selected('downloads')}}>
+      <a href="{{'/downloads/'|url}}" title="{{_('Downloads')}}"><span class="glyphicon glyphicon-download"></span></a>
+    </li>
+    <li ondragstart="return false;" {{selected('logs')}}>
+      <a href="{{'/logs/'|url}}" title="{{_('Logs')}}"><span class="glyphicon glyphicon-list"></span></a>
+    </li>
+  {% if user.is_admin %}
+    <li ondragstart="return false;" {{selected('admin')}}>
+      <a href="{{'/admin/'|url}}" title="{{_('Administration')}}"><span class="glyphicon glyphicon-cog"></span></a>
+    </li>
+  {% endif %}
+    <li ondragstart="return false;" {{selected('settings', True)}}>
+      <a href="{{'/settings/'|url}}"  title="{{_('Config')}}"><span class="glyphicon glyphicon-wrench"></span></a>
+    </li>
+    <li class="divider-vertical"></li>
+    <li ondragstart="return false;">
+      <a role="button" id="action_add1" data-toggle="modal" data-target="#add_box" class="action_add" title="{{_('Add Package')}}"><span class="glyphicon glyphicon-plus"></span></a>
+    </li>
+  </ul>
+  <span id="cap_info1" class="cap_info col-xs-12 col-sm-auto" style="display: {% if captcha %}inline{%else%}none{% endif %};margin-top:-2px; height: 15px;">
+      <button id="action_cap1" class="btn btn-default navbar-btn col-xs-12 col-sm-auto" data-toggle="modal" data-target="#cap_box" data-backdrop="static"><span  class="glyphicon glyphicon-barcode"></span> {{_('Captcha waiting')}}</button>
+  </span>
+  <ul class="nav navbar-nav navbar-right">
+    <li id="load-indicator1" class="load-indicator" style="opacity: 0; display: block; margin-top: 11px; margin-right: 35px;">
+       <img src="{{'/media/pyplex/img/ajax-loader.gif'|url}}" alt="" style="padding-right: 5px"/>
+       {{_('loading')}}
+    </li>
+  </ul>
+</nav>
 <div id="head-panel">
   <div id="head-search-and-login">
     {% block headpanel %}
@@ -70,11 +115,6 @@
       </div>
       <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
         <ul class="nav navbar-nav">
-          {% macro selected(name, right=False) -%}
-            {% if name in url -%}class="{% if right -%}right {% endif %}selected"{%- endif %}
-            {% if not name in url and right -%}class="right"{%- endif %}
-          {%- endmacro %}
-
         {% block menu %}
          {% if user.is_authenticated %}
           <li ondragstart="return false;" {{selected('home')}}>
@@ -111,7 +151,7 @@
           <ul class="nav navbar-nav navbar-right">
             <li><span class="navbar-text"><span class="glyphicon glyphicon-user"></span><span class="hidden-sm hidden-md"> {{user.name}}</span></span></li>
             <li><a href="{{'/logout'|url}}"  class="action logout" rel="nofollow"><span class="glyphicon glyphicon-log-out"></span><span class="hidden-sm hidden-md">  {{_('Logout')}}</span></a></li>
-            <li><a href="{{'/info'|url}}"  class="action info" rel="nofollow"><span class="glyphicon glyphicon-info-sign"></span><span class="hidden-sm hidden-md">  {{_('Info')}}</span></a></li>
+            <li ondragstart="return false;" {{selected('info')}}><a href="{{'/info'|url}}"  class="action info" rel="nofollow"><span class="glyphicon glyphicon-info-sign"></span><span class="hidden-sm hidden-md">  {{_('Info')}}</span></a></li>
           </ul>
         {% endif %}        
       </div><!-- /.navbar-collapse -->
@@ -128,15 +168,15 @@
         <button id="action_play" class="btn btn-danger" href="#" title="{{_('Resume Queue')}}"><span class="glyphicon glyphicon-play"></span>&nbsp;</button>
         <button id="action_stop" type="button" class="btn btn-danger" title="{{_('Pause Queue')}}"><span class="glyphicon glyphicon-pause"></span>&nbsp;</button>
         <button id="action_cancel" type="button" class="btn btn-danger" title="{{_('Abort Downloads')}}"><span class="glyphicon glyphicon-stop"></span>&nbsp;</button>
-        <button id="action_add" data-toggle="modal" data-target="#add_box" type="button" class="btn btn-danger" title="{{_('Add Package')}}"><span class="glyphicon glyphicon-plus"></span>&nbsp;</button>
+        <button id="action_add2" data-toggle="modal" data-target="#add_box" type="button" class="btn btn-danger" title="{{_('Add Package')}}"><span class="glyphicon glyphicon-plus"></span>&nbsp;</button>
     </div>
 {% endif %}
 
 {% block pageactions %}
 {% endblock %}
 
-    <span id="cap_info" class="col-xs-12 col-sm-auto" style="display: {% if captcha %}inline{%else%}none{% endif %};margin-top:-2px;">
-        <button id="action_cap" class="btn btn-default col-xs-12 col-sm-auto" data-toggle="modal" data-target="#cap_box"><span  class="glyphicon glyphicon-barcode"></span> {{_('Captcha waiting')}}</button>
+    <span id="cap_info2" class="cap_info col-xs-12 col-sm-auto" style="display: {% if captcha %}inline{%else%}none{% endif %};margin-top:-2px;">
+        <button id="action_cap2" class="btn btn-default col-xs-12 col-sm-auto" data-toggle="modal" data-target="#cap_box" data-backdrop="static"><span  class="glyphicon glyphicon-barcode"></span> {{_('Captcha waiting')}}</button>
     </span>
 
 
@@ -145,7 +185,7 @@
         <button class="btn btn-dark col-xs-3 col-sm-auto"><span class="hidden-sm">{{_('Download:')}}</span><span class="glyphicon glyphicon-download hidden-xs hidden-md hidden-lg"></span> <span id="time"  class="label label-{% if status.download %}success{% else %}danger{% endif %}">{% if status.download %}{{_('on')}}{% else %}{{_('off')}}{% endif %}</span></button>
         <button type="button" class="btn btn-dark col-xs-3 col-sm-auto"><span class="hidden-sm">{{_('Reconnect:')}}</span><span class="glyphicon glyphicon-refresh hidden-xs hidden-md hidden-lg"></span> <span id="reconnect" class="label label-{% if status.reconnect %}success{% else %}danger{% endif %}">{% if status.reconnect %}{{_('on')}}{% else %}{{_('off')}}{% endif %}</span></button>
         <button type="button" class="btn btn-dark col-xs-3 col-sm-auto"><span class="action backlink"><span class="hidden-xs hidden-sm">{{_('Speed:')}} </span><b id="speed">{{status.speed}}</b></span></button>
-        <button type="button" class="btn btn-dark col-xs-3 col-sm-auto"><span class="action cog">{{_('Active:')}} <b id="aktiv" title="{{_('Active')}}">{{status.active}}</b> / <b id="aktiv_from" title="{{_('Queued')}}">{{status.queue}}</b> / <b id="aktiv_total" title="{{_('Total')}}">{{status.total}}</b></span></button>
+        <span class="btn btn-dark col-xs-3 col-sm-auto"><span class="action cog">{{_('Active:')}} <b id="aktiv" title="{{_('Active')}}">{{status.active}}</b> / <b id="aktiv_from" title="{{_('Queued')}}">{{status.queue}}</b> / <b id="aktiv_total" title="{{_('Total')}}">{{status.total}}</b></span></span>
     </div>
 {% endif %}
 </div>
@@ -163,7 +203,7 @@
               <p><b>{{message}}</b></p>
           {% endfor %}
         </div>
-        <div id="load-indicator" style="opacity: 0; margin-top: 5px;">
+        <div id="load-indicator2" class="load-indicator" style="opacity: 0; margin-top: 5px;">
              <img src="{{'/media/pyplex/img/ajax-loader.gif'|url}}" alt="" style="padding-right: 5px"/>
              {{_('loading')}}
         </div>
@@ -175,7 +215,7 @@
 </div>
 
 <hr style="clear: both;" />
-<div id="foot" class="navbar navbar-static-bottom navbar-inverse" style="width: 100%; text-align:center;">&copy; 2008-2018 pyLoad Team</div>
+<div id="foot" class="navbar navbar-static-bottom navbar-inverse" style="width: 100%; text-align:center;">&copy; 2008-2020 pyLoad Team</div>
 
 <div id="goto_top" class="btn-dark hidden" style="position: fixed; width: 25px; height: 25px;background-color: #eeeeee; color: #282828; opacity: 0.5; cursor: pointer; z-index: 10; border-radius: 5px; display: block;" title="{{_('Back to top')}}">
     <div class="glyphicon glyphicon-chevron-up" style="padding-top: 5px; padding-left: 6px; opacity: 0.5;"></div>
