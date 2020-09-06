@@ -23,12 +23,14 @@ from os import makedirs, path, chdir
 from os.path import join
 import sys
 from sys import argv, platform
+import module.common
 
 import __builtin__
 __builtin__.owd = path.abspath("") #original working directory
 __builtin__.pypath = path.abspath(path.join(__file__, "..", ".."))
 
 sys.path.append(join(pypath, "module", "lib"))
+sys.path.append(pypath) # to be able to run as module in debugpy
 
 homedir = ""
 
@@ -74,5 +76,7 @@ if not path.exists(configdir):
 
 __builtin__.configdir = configdir
 chdir(configdir)
+reload(module)
+reload(module.common)
 
 #print "Using %s as working directory." % configdir
