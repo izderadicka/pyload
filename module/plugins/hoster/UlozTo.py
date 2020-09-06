@@ -92,8 +92,17 @@ class UlozTo(SimpleHoster):
         m = re.search(r'<a .* data-href="(.*)" class=".*js-free-download-button-dialog.*?"', self.data)
         if not m:
             self.error(_("Free download form not found"))
+            
+        pre_download_link = self.fixurl(m.group(1))
+        header = self.load(pre_download_link, just_header=True)
 
-        self.data = self.load(self.fixurl(m.group(1)))
+        # in case we are redirected to file
+        if header["code"] == 302 and header["location"]:
+            self.log_debug("Slow download is not guided by CAPTCHA, downloading directly from %s" %  header['location'])
+            self.download(header['location'])
+            return
+
+        self.data = self.load(pre_download_link)
 
         action, inputs = self.parse_html_form('id="frm-freeDownloadForm-form"')
 

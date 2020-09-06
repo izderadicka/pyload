@@ -33,6 +33,6 @@ class UlozTo(OCR):
             text = clslib.classify_audio_file(audio, cfg_file, ext_file)
             return text
 
-        except NameError:
-            self.log_error(_("Unable to decode audio captcha"),
+        except NameError as e:
+            self.log_error(_("Unable to decode audio captcha: %s" % e),
                            _("Please install adecaptcha library from https://github.com/izderadicka/adecaptcha"))
