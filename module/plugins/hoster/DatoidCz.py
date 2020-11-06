@@ -32,18 +32,28 @@ class DatoidCz(SimpleHoster):
     URL_REPLACEMENTS = [(r'datoid.sk', r'datoid.cz'),
                         (r'datoid.pl', r'datoid.cz')]
 
+
+    def setup(self):
+        SimpleHoster.setup(self)
+        self.chunk_limit = 1
+        self.resume_download = True
+
     def handle_free(self, pyfile):
         url = self.req.lastEffectiveURL
         urlp = urlparse.urlparse(url)
 
         json_data = json.loads(self.load(urlparse.urljoin(
-            url, "/f/" + urlp.path + str(int(time.time() * 1000)))))
+            url, "/f/" + urlp.path + "?request=1&_=%s"% str(int(time.time() * 1000)))))
         self.log_debug(json_data)
 
         if "error" in json_data:
             self.fail(json_data['error'])
 
-        self.link = json_data['redirect']
+        self.link = json_data.get("download_link") or json_data.get("download_link_cdn")
+
+        if not self.link:
+            self.fail("cannot get download link")
+
 
     def handle_premium(self, pyfile):
         url = self.req.lastEffectiveURL
