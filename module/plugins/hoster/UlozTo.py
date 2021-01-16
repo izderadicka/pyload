@@ -94,8 +94,29 @@ class UlozTo(SimpleHoster):
         if not m:
             self.error(_("Free download button not found"))
 
+        pre_download_link = self.fixurl(m.group(1))
+
         self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With: XMLHttpRequest"])
-        self.data = self.load(domain + m.group(1))
+        
+        header = self.load(pre_download_link, just_header=True)
+
+        # in case we are redirected to file
+        if header["code"] == 302 and header["location"]:
+            self.log_debug("Slow download is not guided by CAPTCHA, downloading directly from %s" %  header['location'])
+            self.download(header['location'])
+            return
+
+        
+        self.data = self.load(pre_download_link)
+        if self.data.startswith("{"):
+            # it's json
+            msg = json.loads(self.data)
+            download_link = msg.get("slowDownloadLink")
+            if download_link:
+                self.download(download_link)
+            else:
+                self.error("Got JSON instead of captcha form - probably need recaptcha")
+
         self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With:"])
 
         action, inputs = self.parse_html_form('id="frm-freeDownloadForm-form"')
