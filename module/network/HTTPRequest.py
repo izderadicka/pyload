@@ -39,7 +39,7 @@ def myurlencode(data):
     return urlencode(dict((x.encode('utf_8') if isinstance(x, unicode) else x, \
         y.encode('utf_8') if isinstance(y, unicode) else y ) for x, y in data.iteritems()))
 
-bad_headers = range(400, 404) + range(405, 418) + range(500, 506)
+bad_headers = range(400, 401) +range(402,404) + range(405, 418) + range(500, 506)
 
 unofficial_responses = {
     440: "Login Timeout - The client's session has expired and must log in again.",
