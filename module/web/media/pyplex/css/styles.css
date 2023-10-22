@@ -373,6 +373,7 @@ textarea.form-control:focus {
 }
 
 .modal-body {
+  overflow: auto;
   background-color: #282828;
 }
 
@@ -381,6 +382,7 @@ textarea.form-control:focus {
 }
 
 .modal-header {
+  overflow: auto;
   border-bottom: 1px solid #212121;
 }
 
@@ -453,16 +455,6 @@ textarea.form-control:focus {
 .btn[disabled],
 fieldset[disabled] .btn {
   pointer-events: auto;
-}
-
-.peek-a-bar {
-  margin: 0;
-  position: fixed;
-  width: 100%;
-  left: 0;
-  right: 0;
-  text-align: center;
-  z-index: 1040;
 }
 
 .navbar-nav .divider-vertical {

@@ -11,7 +11,7 @@ from .SimpleHoster import SimpleHoster
 class MultiHoster(SimpleHoster):
     __name__ = "MultiHoster"
     __type__ = "hoster"
-    __version__ = "0.70"
+    __version__ = "0.72"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -33,9 +33,8 @@ class MultiHoster(SimpleHoster):
     LEECH_HOSTER = False
     DIRECT_LINK = None
 
-    @classmethod
-    def get_info(cls, url="", html=""):
-        return Base.get_info(url, html)
+    def get_info(self, url="", html=""):
+        return super(SimpleHoster, self).get_info(url, html)
 
     def init(self):
         self.PLUGIN_NAME = self.pyload.pluginManager.hosterPlugins.get(self.classname)['name']
@@ -50,13 +49,6 @@ class MultiHoster(SimpleHoster):
         self.multiDL = bool(self.account)
         self.resume_download = self.premium
 
-    #@TODO: Recheck in 0.4.10
-    def setup_base(self):
-        klass = self.pyload.pluginManager.loadClass("hoster", self.classname)
-        self.get_info = klass.get_info
-
-        SimpleHoster.setup_base(self)
-
     def _preload(self):
         pass
 
@@ -65,7 +57,8 @@ class MultiHoster(SimpleHoster):
 
         if self.pyfile.pluginname != self.__name__:
             overwritten_plugin = self.pyload.pluginManager.loadClass("hoster", self.pyfile.pluginname)
-            self.pyfile.url = replace_patterns(self.pyfile.url, overwritten_plugin.URL_REPLACEMENTS)
+            if overwritten_plugin is not None:
+                self.pyfile.url = replace_patterns(self.pyfile.url, overwritten_plugin.URL_REPLACEMENTS)
 
         if self.DIRECT_LINK is None:
             self.direct_dl = self.__pattern__ != r'^unmatchable$' and re.match(self.__pattern__, self.pyfile.url) is not None

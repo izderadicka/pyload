@@ -9,14 +9,11 @@ import urllib
 import urlparse
 from xml.dom.minidom import parseString as parse_xml
 
-from module.network.CookieJar import CookieJar
-from module.network.HTTPRequest import HTTPRequest
-
 from ..internal.Hoster import Hoster
 from ..internal.misc import (
-    Popen, decode, exists, fs_encode, fsjoin, isexecutable, json, reduce, renice, replace_patterns, safename,
-    uniqify, which)
-from ..internal.Plugin import Abort, Skip
+    BIGHTTPRequest, Popen, decode, exists, fs_encode, fsjoin, isexecutable, json, reduce, renice, replace_patterns,
+    safename, uniqify, which)
+from ..internal.Plugin import Skip
 
 
 def try_get(data, *path):
@@ -43,31 +40,6 @@ def try_get(data, *path):
         res = get_one(res, item)
 
     return res
-
-
-class BIGHTTPRequest(HTTPRequest):
-    """
-    Overcome HTTPRequest's load() size limit to allow
-    loading very big web pages by overrding HTTPRequest's write() function
-    """
-
-    # @TODO: Add 'limit' parameter to HTTPRequest in v0.4.10
-    def __init__(self, cookies=None, options=None, limit=2000000):
-        self.limit = limit
-        HTTPRequest.__init__(self, cookies=cookies, options=options)
-
-    def write(self, buf):
-        """ writes response """
-        if self.limit and self.rep.tell() > self.limit or self.abort:
-            rep = self.getResponse()
-            if self.abort:
-                raise Abort()
-            f = open("response.dump", "wb")
-            f.write(rep)
-            f.close()
-            raise Exception("Loaded Url exceeded limit")
-
-        self.rep.write(buf)
 
 
 class Ffmpeg(object):
@@ -165,6 +137,8 @@ class Ffmpeg(object):
                      "-sub_charenc", "utf8"])
 
         call = [self.CMD] + args + [self.output_filename]
+        self.plugin.log_debug("EXECUTE " + " ".join(call))
+
         p = Popen(
             call,
             stdout=subprocess.PIPE,
@@ -235,7 +209,7 @@ class Ffmpeg(object):
 class YoutubeCom(Hoster):
     __name__ = "YoutubeCom"
     __type__ = "hoster"
-    __version__ = "0.80"
+    __version__ = "0.89"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:[^/]*\.)?(?:youtu\.be/|youtube\.com/watch\?(?:.*&)?v=)[\w\-]+'
@@ -263,7 +237,7 @@ class YoutubeCom(Hoster):
 
     __description__ = """Youtube.com hoster plugin"""
     __license__ = "GPLv3"
-    __authors__ = [("spoob", "spoob@pyload.org"),
+    __authors__ = [("spoob", "spoob@pyload.net"),
                    ("zoidberg", "zoidberg@mujmail.cz"),
                    ("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
 
@@ -322,16 +296,7 @@ class YoutubeCom(Hoster):
 
     def _decrypt_signature(self, encrypted_sig):
         """Turn the encrypted 's' field into a working signature"""
-        # try:
-        #     player_url = json.loads(re.search(r'"assets":.+?"js":\s*("[^"]+")',self.data).group(1))
-        # except (AttributeError, IndexError):
-        #     self.fail(_("Player URL not found"))
-        player_url = self.fixurl(self.player_config['assets']['js'])
-
-        if not player_url.endswith(".js"):
-            self.fail(_("Unsupported player type %s") % player_url)
-
-        sig_cache_id = player_url + "_" + ".".join(str(len(part)) for part in encrypted_sig.split('.'))
+        sig_cache_id = self.player_url + "_" + ".".join(str(len(part)) for part in encrypted_sig.split('.'))
 
         cache_info = self.db.retrieve("cache")
         cache_dirty = False
@@ -347,7 +312,7 @@ class YoutubeCom(Hoster):
             decrypted_sig = decrypt_func(encrypted_sig)
 
         else:
-            player_data = self.load(player_url)
+            player_data = self.load(self.player_url)
 
             m = re.search(r'\b[cs]\s*&&\s*[adf]\.set\([^,]+\s*,\s*encodeURIComponent\s*\(\s*(?P<sig>[a-zA-Z0-9$]+)\(', player_data) or \
                 re.search(r'\b[a-zA-Z0-9]+\s*&&\s*[a-zA-Z0-9]+\.set\([^,]+\s*,\s*encodeURIComponent\s*\(\s*(?P<sig>[a-zA-Z0-9$]+)\(', player_data) or \
@@ -378,7 +343,7 @@ class YoutubeCom(Hoster):
 
             except (JSInterpreterError, AssertionError), e:
                 self.log_error(_("Signature decode failed"), e)
-                self.fail(e.message)
+                self.fail(e.args[0])
 
         #: Remove old records from cache
         for _k in list(cache_info['cache'].keys()):
@@ -463,12 +428,12 @@ class YoutubeCom(Hoster):
         self.pyfile.name = self.file_name + file_suffix
 
         try:
-            filename = self.download(url, disposition=False, resume=False)
+            filename = self.download(url, disposition=False)
         except Skip, e:
             filename = os.path.join(self.pyload.config.get("general", "download_folder"),
                                     self.pyfile.package().folder,
                                     self.pyfile.name)
-            self.log_info(_("Download skipped: %s due to %s") % (self.pyfile.name, e.message))
+            self.log_info(_("Download skipped: %s due to %s") % (self.pyfile.name, e.args[0]))
 
         return filename, chosen_fmt
 
@@ -545,16 +510,15 @@ class YoutubeCom(Hoster):
                 h, m = divmod(m, 60)
                 return "%02d:%02d:%02d,%s" % (h, m, s, milli)
 
-            i = 1
             srt = ""
             dom = parse_xml(timedtext)
             body = dom.getElementsByTagName("body")[0]
             paras = body.getElementsByTagName("p")
+            subtitles = []
             for para in paras:
-                subtitle_element = str(i) + "\n"
                 try:
-                    subtitle_element += _format_srt_time(int(para.attributes['t'].value)) + ' --> ' + \
-                                _format_srt_time(int(para.attributes['t'].value) + int(para.attributes['d'].value)) + "\n"
+                    start_time = int(para.attributes['t'].value)
+                    end_time = int(para.attributes['t'].value) + int(para.attributes['d'].value)
                 except KeyError:
                     continue
 
@@ -571,19 +535,31 @@ class YoutubeCom(Hoster):
                             subtitle_text += unicode(child.data)
 
                 if subtitle_text.strip():
-                    subtitle_element += subtitle_text
-
+                    subtitles.append({'start': start_time,
+                                      'end': end_time,
+                                      'text': subtitle_text})
                 else:
                     continue
 
-                srt += subtitle_element + "\n\n"
-                i += 1
+            for line_num in range(len(subtitles)):
+                start_time = subtitles[line_num]['start']
+                try:
+                    end_time = min(subtitles[line_num]['end'], subtitles[line_num + 1]['start'])
+                except IndexError:
+                    end_time = subtitles[line_num]['end']
+
+                subtitle_text = subtitles[line_num]['text']
+
+                subtitle_element = str(line_num + 1) + "\n" \
+                                   + _format_srt_time(start_time) + ' --> ' + _format_srt_time(end_time) + "\n" \
+                                   + subtitle_text + "\n\n"
+                srt += subtitle_element
 
             return srt
 
         srt_files =[]
         try:
-            subs = json.loads(self.player_config['args']['player_response'])['captions']['playerCaptionsTracklistRenderer']['captionTracks']
+            subs = self.player_response['captions']['playerCaptionsTracklistRenderer']['captionTracks']
             subtitles_info = dict([(_subtitle['languageCode'],
                                     (urllib.unquote(_subtitle['baseUrl']).decode('unicode-escape') + "&fmt=3",
                                      _subtitle['vssId'].startswith("a."),
@@ -622,7 +598,7 @@ class YoutubeCom(Hoster):
 
                         srt_filename = fsjoin(self.pyload.config.get("general", "download_folder"),
                                               self.pyfile.package().folder,
-                                              os.path.splitext(self.file_name)[0] + "." + subtitle_code + ".srt")
+                                              self.file_name + "." + subtitle_code + ".srt")
 
                         if self.pyload.config.get('download', 'skip_existing') and \
                                 exists(srt_filename) and os.stat(srt_filename).st_size != 0:
@@ -708,8 +684,8 @@ class YoutubeCom(Hoster):
                 self.ffmpeg.set_output_filename(final_filename)
 
                 self.pyfile.name = os.path.basename(final_filename)
-                self.pyfile.size = os.path.getsize(video_filename) + \
-                                   os.path.getsize(audio_filename)  #: Just an estimate
+                self.pyfile.size = os.path.getsize(fs_encode(video_filename)) + \
+                                   os.path.getsize(fs_encode(audio_filename))  #: Just an estimate
 
                 if self.ffmpeg.run():
                     self.remove(video_filename, trash=False)
@@ -761,6 +737,7 @@ class YoutubeCom(Hoster):
 
     def setup(self):
         self.resume_download = True
+        self.chunk_limit = -1
         self.multiDL = True
 
         try:
@@ -769,13 +746,17 @@ class YoutubeCom(Hoster):
             pass
 
         self.req.http = BIGHTTPRequest(
-            cookies=CookieJar(None),
+            cookies=self.req.cj,
             options=self.pyload.requestFactory.getOptions(),
             limit=5000000)
 
     def process(self, pyfile):
         pyfile.url = replace_patterns(pyfile.url, self.URL_REPLACEMENTS)
         self.data = self.load(pyfile.url)
+
+        url, inputs = self.parse_html_form('action="https://consent.youtube.com/s"')
+        if url is not None:
+            self.data = self.load(url, post=inputs)
 
         m = re.search(r'"playabilityStatus":{"status":"(\w+)",(:?"(?:reason":|messages":\[)"([^"]+))?', self.data)
         if m is None:
@@ -791,15 +772,32 @@ class YoutubeCom(Hoster):
             self.temp_offline()
 
         m = re.search(r'ytplayer.config = ({.+?});', self.data)
-        if m is None:
-            self.fail(_("Player config pattern not found"))
+        if m is not None:
+            self.player_config = json.loads(m.group(1))
+            self.player_response = json.loads(self.player_config['args']['player_response'])
 
-        self.player_config = json.loads(m.group(1))
+        else:
+            m =re.search(r'ytInitialPlayerResponse = ({.+?});', self.data)
+            if m is not None:
+                self.player_config = json.loads(m.group(1))
+                self.player_response = self.player_config
+
+            else:
+                self.fail(_("Player config pattern not found"))
+
+        m = re.search(r'"jsUrl"\s*:\s*"(.+?)"', self.data) or re.search(r'"assets":.+?"js":\s*"(.+?)"', self.data)
+        if m is None:
+            self.fail(_("Player URL pattern not found"))
+
+        self.player_url = self.fixurl(m.group(1))
+
+        if not self.player_url.endswith(".js"):
+            self.fail(_("Unsupported player type %s") % self.player_url)
 
         self.ffmpeg = Ffmpeg(self.config.get('priority'), self)
 
         #: Set file name
-        self.file_name = decode(json.loads(self.player_config['args']['player_response'])['videoDetails']['title'])
+        self.file_name = decode(self.player_response['videoDetails']['title'])
 
         #: Check for start time
         self.start_time = (0, 0)
@@ -812,21 +810,17 @@ class YoutubeCom(Hoster):
         self.file_name = safename(self.file_name)
 
         #: Parse available streams
-        self.streams = []
-
+        streams = []
         for path in [('args', 'url_encoded_fmt_stream_map'),
                      ('args', 'adaptive_fmts')]:
             item = try_get(self.player_config, *path)
             if item is not None:
-                streams = [urlparse.parse_qs(_s) for _s in item.split(',')]
-                streams = [dict((k, v[0]) for k,v in _d.items()) for _d in streams]
-                self.streams.extend(streams)
+                strms = [urlparse.parse_qs(_s) for _s in item.split(',')]
+                strms = [dict((k, v[0]) for k,v in _d.items()) for _d in strms]
+                streams.extend(strms)
+        streams.extend(try_get(self.player_response, 'streamingData', 'formats') or [])
+        streams.extend(try_get(self.player_response, 'streamingData', 'adaptiveFormats') or [])
 
-        player_response = json.loads(self.player_config['args']['player_response'])
-        self.streams.extend(try_get(player_response, 'streamingData', 'formats') or [])
-        self.streams.extend(try_get(player_response, 'streamingData', 'adaptiveFormats') or [])
-
-        streams = self.streams
         self.streams = []
         for _s in streams:
             itag = int(_s['itag'])
@@ -834,20 +828,26 @@ class YoutubeCom(Hoster):
             url = _s.get('url', None)
             if url is None:
                 cipher = _s.get('cipher', None)
-                if cipher is None:
-                    continue
+                if cipher is not None:
+                    url_data = urlparse.parse_qs(cipher)
+                    url_data = dict((k, v[0]) for k,v in url_data.items())
+                    url = url_data.get('url')
+                    if url is None:
+                        continue
 
-                url_data = urlparse.parse_qs(cipher)
-                url_data = dict((k, v[0]) for k,v in url_data.items())
-                url = url_data.get('url', None)
-                if url is None:
-                    continue
+                else:
+                    cipher = _s.get('signatureCipher')
+                    if cipher is not None:
+                        url_data = urlparse.parse_qs(cipher)
+                        url = try_get(url_data, 'url', 0)
+                        if url is None:
+                            continue
 
             self.streams.append((itag,
                                  url,
-                                 url_data.get('s', url_data.get('sig', None)),
+                                 try_get(url_data, 's', 0) or url_data.get('s', url_data.get('sig', None)),
                                  's' in url_data,
-                                 url_data.get('sp', "signature")))
+                                 try_get(url_data, 'sp', 0) or url_data.get('sp', "signature")))
 
         self.streams = uniqify(self.streams)
 

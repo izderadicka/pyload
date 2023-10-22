@@ -140,7 +140,7 @@ class Core(object):
                             print pid
                             exit(0)
                         else:
-			    print "false"
+                            print "false"
                             exit(1)
                     elif option == "--clean":
                         self.cleanTree()
@@ -284,7 +284,7 @@ class Core(object):
             return
 
         try:
-            os.kill(pid, 3) #SIGUIT
+            os.kill(pid, 3)  #: SIGQUIT
 
             t = time()
             print "waiting for pyLoad to quit"

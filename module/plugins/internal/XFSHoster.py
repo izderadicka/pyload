@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 
-import operator
 import random
 import re
 import urlparse
 
+from ..captcha.HCaptcha import HCaptcha
 from ..captcha.ReCaptcha import ReCaptcha
 from ..captcha.SolveMedia import SolveMedia
-from .misc import html_unescape, parse_time, seconds_to_midnight, set_cookie, search_pattern
+from .misc import html_unescape, parse_time, search_pattern, seconds_to_midnight, set_cookie
 from .SimpleHoster import SimpleHoster
 
 
 class XFSHoster(SimpleHoster):
     __name__ = "XFSHoster"
     __type__ = "hoster"
-    __version__ = "0.85"
+    __version__ = "0.89"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -28,7 +28,8 @@ class XFSHoster(SimpleHoster):
     __license__ = "GPLv3"
     __authors__ = [("zoidberg", "zoidberg@mujmail.cz"),
                    ("stickell", "l.stickell@yahoo.it"),
-                   ("Walter Purcaro", "vuolter@gmail.com")]
+                   ("Walter Purcaro", "vuolter@gmail.com"),
+                   ("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
 
     PLUGIN_DOMAIN = None
 
@@ -52,6 +53,7 @@ class XFSHoster(SimpleHoster):
     CAPTCHA_PATTERN = r'(https?://[^"\']+?/captchas?/[^"\']+)'
     CAPTCHA_BLOCK_PATTERN = r'>Enter code.*?<div.*?>(.+?)</div>'
     RECAPTCHA_PATTERN = None
+    HCAPTCHA_PATTERN = None
     SOLVEMEDIA_PATTERN = None
 
     FORM_PATTERN = None
@@ -239,7 +241,7 @@ class XFSHoster(SimpleHoster):
 
             self.log_debug(captcha_div)
 
-            inputs['code'] = "".join(a[1] for a in sorted(numerals, key=operator.itemgetter(0)))
+            inputs['code'] = "".join(a[1] for a in sorted(numerals, key=lambda i: int(i[0])))
 
             self.log_debug("Captcha code: %s" % inputs['code'], numerals)
             return
@@ -256,7 +258,22 @@ class XFSHoster(SimpleHoster):
 
         if captcha_key:
             self.captcha = recaptcha
-            inputs['g-recaptcha-response'], _ = recaptcha.challenge(captcha_key)
+            inputs['g-recaptcha-response'] = recaptcha.challenge(captcha_key)
+            return
+
+        hcaptcha = HCaptcha(self.pyfile)
+        try:
+            captcha_key = search_pattern(self.HCAPTCHA_PATTERN, self.data).group(1)
+
+        except Exception:
+            captcha_key = hcaptcha.detect_key()
+
+        else:
+            self.log_debug("HCaptcha key: %s" % captcha_key)
+
+        if captcha_key:
+            self.captcha = hcaptcha
+            inputs['g-recaptcha-response'] = inputs['h-captcha-response'] = hcaptcha.challenge(captcha_key)
             return
 
         solvemedia = SolveMedia(self.pyfile)

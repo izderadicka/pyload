@@ -2,8 +2,7 @@
 
 import re
 
-from module.network.RequestFactory import getURL as get_url
-
+from ..captcha.HCaptcha import HCaptcha
 from ..captcha.ReCaptcha import ReCaptcha
 from ..internal.misc import json
 from ..internal.SimpleHoster import SimpleHoster
@@ -12,10 +11,10 @@ from ..internal.SimpleHoster import SimpleHoster
 class NitroflareCom(SimpleHoster):
     __name__ = "NitroflareCom"
     __type__ = "hoster"
-    __version__ = "0.29"
+    __version__ = "0.42"
     __status__ = "testing"
 
-    __pattern__ = r'https?://(?:www\.)?nitroflare\.com/view/(?P<ID>[\w^_]+)'
+    __pattern__ = r'https?://(?:www\.)?(?:nitro\.download|nitroflare\.com)/view/(?P<ID>[\w^_]+)'
     __config__ = [("activated", "bool", "Activated", True),
                   ("use_premium", "bool", "Use premium account if available", True),
                   ("fallback", "bool",
@@ -31,71 +30,85 @@ class NitroflareCom(SimpleHoster):
                    ("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
 
     INFO_PATTERN = r'title="(?P<N>.+?)".+>(?P<S>[\d.,]+) (?P<U>[\w^_]+)'
-    OFFLINE_PATTERN = r'>File doesn\'t exist'
-
     LINK_PATTERN = r'(https?://[\w\-]+\.nitroflare\.com/.+?)"'
+
     DIRECT_LINK = False
+    DISPOSITION = False
 
     PREMIUM_ONLY_PATTERN = r'This file is available with Premium only'
     DL_LIMIT_PATTERN = r'You have to wait \d+ minutes to download your next file.'
 
-    @classmethod
-    def api_info(cls, url):
+    URL_REPLACEMENTS = [(r'nitro\.download', "nitroflare.com")]
+
+    # See https://nitroflare.com/member?s=general-api
+    API_URL = "https://nitroflare.com/api/v2/"
+
+    def api_request(self, method, **kwargs):
+        json_data = self.load(self.API_URL + method, get=kwargs)
+        return json.loads(json_data)
+
+    def api_info(self, url):
         info = {}
-        file_id = re.search(cls.__pattern__, url).group('ID')
+        file_id = re.search(self.__pattern__, url).group('ID')
 
-        data = json.loads(get_url("https://nitroflare.com/api/v2/getFileInfo",
-                                  get={'files': file_id},
-                                  decode=True))
+        api_data = self.api_request("getFileInfo", files=file_id)
 
-        if data['type'] == 'success':
-            fileinfo = data['result']['files'][file_id]
+        if api_data['type'] == 'success':
+            fileinfo = api_data['result']['files'][file_id]
             info['status'] = 2 if fileinfo['status'] == 'online' else 1
             info['name'] = fileinfo['name']
             info['size'] = fileinfo['size']  #: In bytes
+            info['post_url'] = fileinfo['url']
 
         return info
 
     def handle_free(self, pyfile):
         #: Used here to load the cookies which will be required later
-        self.load("http://nitroflare.com/ajax/setCookie.php",
+        self.load("https://nitroflare.com/ajax/setCookie.php",
                   post={'fileId': self.info['pattern']['ID']})
 
-        self.data = self.load(pyfile.url,
+        self.data = self.load(self.info["post_url"],
                               post={'goToFreePage': ""})
 
         try:
             wait_time = int(re.search(r'var timerSeconds = (\d+);', self.data).group(1))
 
-        except Exception:
+        except (IndexError, ValueError, AttributeError):
             wait_time = 120
 
-        recaptcha = ReCaptcha(pyfile)
-        recaptcha_key = recaptcha.detect_key()
-
-        self.data = self.load("http://nitroflare.com/ajax/freeDownload.php",
-                              post={'method': "startTimer",
-                                    'fileId': self.info['pattern']['ID']})
-
-        self.check_errors()
+        data = self.load("https://nitroflare.com/ajax/freeDownload.php",
+                         post={'method': "startTimer",
+                               'fileId': self.info['pattern']['ID']},
+                         ref=self.req.lastEffectiveURL)
 
         self.set_wait(wait_time)
 
+        self.check_errors(data=data)
+
         inputs = {'method': "fetchDownload"}
 
+        recaptcha = ReCaptcha(pyfile)
+        recaptcha_key = recaptcha.detect_key()
         if recaptcha_key:
             self.captcha = recaptcha
-            response, _ = self.captcha.challenge(recaptcha_key)
+            response = self.captcha.challenge(recaptcha_key)
             inputs['g-recaptcha-response'] = response
 
         else:
-            response = self.captcha.decrypt("http://nitroflare.com/plugins/cool-captcha/captcha.php")
+            hcaptcha = HCaptcha(pyfile)
+            hcaptcha_key = hcaptcha.detect_key()
+            if hcaptcha_key:
+                self.captcha = hcaptcha
+                response = self.captcha.challenge(hcaptcha_key)
+                inputs["g-recaptcha-response"] = inputs["h-captcha-response"] = response
+            else:
+                response = self.captcha.decrypt("https://nitroflare.com/plugins/cool-captcha/captcha.php")
 
         inputs['captcha'] = response
 
         self.wait()
 
-        self.data = self.load("http://nitroflare.com/ajax/freeDownload.php",
+        self.data = self.load("https://nitroflare.com/ajax/freeDownload.php",
                               post=inputs)
 
         if "The captcha wasn't entered correctly" in self.data:
@@ -104,12 +117,14 @@ class NitroflareCom(SimpleHoster):
         return SimpleHoster.handle_free(self, pyfile)
 
     def handle_premium(self, pyfile):
-        data = json.loads(self.load("https://nitroflare.com/api/v2/getDownloadLink",
-                                    get={'file': self.info['pattern']['ID'],
-                                         'user': self.account.user,
-                                         'premiumKey': self.account.get_login('password')}))
+        api_data = self.api_request(
+            "getDownloadLink",
+            file=self.info["pattern"]["ID"],
+            user=self.account.user,
+            premiumKey=self.account.get_login("password"),
+        )
 
-        if data['type'] == 'success':
-            pyfile.name = data['result']['name']
-            pyfile.size = int(data['result']['size'])
-            self.link = data['result']['url']
+        if api_data['type'] == 'success':
+            pyfile.name = api_data['result']['name']
+            pyfile.size = int(api_data['result']['size'])
+            self.link = api_data['result']['url']

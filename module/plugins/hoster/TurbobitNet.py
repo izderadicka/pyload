@@ -3,6 +3,7 @@
 import pycurl
 import re
 
+from ..captcha.HCaptcha import HCaptcha
 from ..captcha.ReCaptcha import ReCaptcha
 from ..internal.SimpleHoster import SimpleHoster
 
@@ -10,10 +11,10 @@ from ..internal.SimpleHoster import SimpleHoster
 class TurbobitNet(SimpleHoster):
     __name__ = "TurbobitNet"
     __type__ = "hoster"
-    __version__ = "0.37"
+    __version__ = "0.51"
     __status__ = "testing"
 
-    __pattern__ = r'https?://(?:(?:www|m)\.)?(?:turbobit\.net|turbo?\.(?:to|cc))/(?:download/free/)?(?P<ID>\w+)'
+    __pattern__ = r'https?://(?:(?:www|m)\.)?(?:(?:trbbt|turbo(?:beet|bite?))\.net|(?:tourbobit|turbobi(?:tn?|f))\.com|turbo?\.(?:to|cc)|turb\.pw)/(?:download/free/)?(?P<ID>\w+)'
     __config__ = [("activated", "bool", "Activated", True),
                   ("use_premium", "bool", "Use premium account if available", True),
                   ("fallback", "bool","Fallback to free download if premium fails", True),
@@ -53,7 +54,9 @@ class TurbobitNet(SimpleHoster):
 
         m = re.search(r'minLimit : (.+?),', self.data)
         if m is None:
-            self.fail(_("minLimit pattern not found"))
+            self.retry_captcha()
+
+        self.captcha.correct()
 
         wait_time = self.js.eval(m.group(1))
         self.wait(wait_time)
@@ -71,19 +74,31 @@ class TurbobitNet(SimpleHoster):
                 self.link = "https://turbobit.net%s" % m.group(1)
 
     def solve_captcha(self):
-        action, inputs = self.parse_html_form("action='#'")
-        if not inputs:
+        action, inputs = self.parse_html_form("id='form-captcha'")
+        if inputs is None:
             self.fail(_("Captcha form not found"))
 
-        if inputs['captcha_type'] == "recaptcha2":
-            self.captcha = ReCaptcha(self.pyfile)
-            inputs['g-recaptcha-response'], challenge = self.captcha.challenge()
-
         else:
-            self.fail(_("Unknown captcha type"))
+            recaptcha = ReCaptcha(self.pyfile)
+            captcha_key = recaptcha.detect_key()
+            if captcha_key:
+                self.captcha = recaptcha
+                response = recaptcha.challenge(captcha_key)
+                inputs["g-recaptcha-response"] = response
 
-        self.data = self.load(self.free_url,
-                              post=inputs)
+            else:
+                hcaptcha = HCaptcha(self.pyfile)
+                captcha_key = hcaptcha.detect_key()
+                if captcha_key:
+                    self.captcha = hcaptcha
+                    response = hcaptcha.challenge(captcha_key)
+                    inputs["g-recaptcha-response"] = inputs["h-captcha-response"] = response
+
+            if captcha_key:
+                self.data = self.load(self.free_url, post=inputs, ref=self.free_url)
+
+            else:
+                self.fail(_("Could not detect captcha type"))
 
     def handle_premium(self, pyfile):
         m = re.search(self.LINK_PREMIUM_PATTERN, self.data)

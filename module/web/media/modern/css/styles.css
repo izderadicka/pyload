@@ -154,6 +154,11 @@ textarea.form-control {
   user-select: none;
 }
 
+.modal-body,
+.modal-header {
+  overflow: auto;
+}
+
 .modal-footer {
   padding: 6px 12px;
   border-top: none;
@@ -273,16 +278,6 @@ fieldset[disabled] .btn-light.active {
 .btn[disabled],
 fieldset[disabled] .btn {
   pointer-events: auto;
-}
-
-.peek-a-bar {
-  margin: 0;
-  position: fixed;
-  width: 100%;
-  left: 0;
-  right: 0;
-  text-align: center;
-  z-index: 1040;
 }
 
 .navbar-nav .divider-vertical {

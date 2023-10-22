@@ -11,7 +11,7 @@ from .Account import Account
 class XFSAccount(Account):
     __name__ = "XFSAccount"
     __type__ = "account"
-    __version__ = "0.62"
+    __version__ = "0.64"
     __status__ = "stable"
 
     __config__ = [("activated", "bool", "Activated", True),
@@ -128,7 +128,7 @@ class XFSAccount(Account):
                     else:
                         unit = None
 
-                    trafficleft = self.parse_traffic(size, unit)
+                    trafficleft = max(0, self.parse_traffic(size, unit))
 
             except Exception, e:
                 self.log_error(e)
@@ -183,7 +183,7 @@ class XFSAccount(Account):
                        'password': password})
 
         if action:
-            url = urlparse.urljoin("http://", action)
+            url = urlparse.urljoin(self.LOGIN_URL, action)
         else:
             url = self.LOGIN_URL
 
@@ -191,14 +191,16 @@ class XFSAccount(Account):
 
         self.check_errors()
 
-    def check_errors(self):
+    def check_errors(self, data=None):
         self.log_info(_("Checking for link errors..."))
 
-        if not self.data:
+        data = data or self.data
+
+        if not data:
             self.log_warning(_("No data to check"))
             return
 
-        m = search_pattern(self.LOGIN_BAN_PATTERN, self.data)
+        m = search_pattern(self.LOGIN_BAN_PATTERN, data)
         if m is not None:
             try:
                 errmsg = m.group(1)
@@ -215,7 +217,7 @@ class XFSAccount(Account):
 
             self.fail_login(errmsg)
 
-        m = search_pattern(self.LOGIN_FAIL_PATTERN, self.data)
+        m = search_pattern(self.LOGIN_FAIL_PATTERN, data)
         if m is not None:
             try:
                 errmsg = m.group(1)

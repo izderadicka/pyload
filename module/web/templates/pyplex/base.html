@@ -8,6 +8,7 @@
 
 <link rel="stylesheet" type="text/css" href="{{'/media/pyplex/css/bootstrap.min.css'|url}}">
 <link rel="stylesheet" type="text/css" href="{{'/media/pyplex/css/jquery-ui-1.12.1.min.css'|url}}"/>
+<link rel="stylesheet" type="text/css" href="{{'/media/pyplex/css/mdtoast.min.css'|url}}"/>
 <link rel="stylesheet" type="text/css" href="{{'/media/pyplex/css/styles.css'|url}}">
 
 <link rel="icon" href="{{'/favicon.ico'|url}}"/>
@@ -35,6 +36,12 @@
 
 {% block head %}
 {% endblock %}
+<script>
+  // Prevent Flash of Unstyled Content (FOUC) in Firefox
+  // see: https://bugzilla.mozilla.org/show_bug.cgi?id=1404468
+  // see: https://stackoverflow.com/a/64158043
+  let FF_FOUC_FIX;
+</script>
 </head>
 <body>
 
@@ -215,7 +222,7 @@
 </div>
 
 <hr style="clear: both;" />
-<div id="foot" class="navbar navbar-static-bottom navbar-inverse" style="width: 100%; text-align:center;">&copy; 2008-2020 pyLoad Team</div>
+<div id="foot" class="navbar navbar-static-bottom navbar-inverse" style="width: 100%; text-align:center;">&copy; 2008-2023 pyLoad Team</div>
 
 <div id="goto_top" class="btn-dark hidden" style="position: fixed; width: 25px; height: 25px;background-color: #eeeeee; color: #282828; opacity: 0.5; cursor: pointer; z-index: 10; border-radius: 5px; display: block;" title="{{_('Back to top')}}">
     <div class="glyphicon glyphicon-chevron-up" style="padding-top: 5px; padding-left: 6px; opacity: 0.5;"></div>
@@ -234,7 +241,7 @@
 
 <script type="text/javascript" src="{{'/media/js/pyplex/jquery-3.2.1.min.js'|url}}"></script>
 <script type="text/javascript" src="{{'/media/js/pyplex/jquery-ui-1.12.1.min.js'|url}}"></script>
-<script type="text/javascript" src="{{'/media/js/pyplex/jquery.peekabar.min.js'|url}}"></script>
+<script type="text/javascript" src="{{'/media/js/pyplex/mdtoast.min.js'|url}}"></script>
 <script type="text/javascript" src="{{'/media/js/pyplex/bootstrap.min.js'|url}}"></script>
 <script type="text/javascript" src="{{'/media/js/pyplex/base.js'|url}}"></script>
 

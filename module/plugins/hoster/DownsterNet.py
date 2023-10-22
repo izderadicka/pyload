@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
-import pycurl
-from module.network.HTTPRequest import BadHeader
+from ..accounts.DownsterNet import DownsterApi
 
 from ..internal.misc import json
 from ..internal.MultiHoster import MultiHoster
@@ -10,7 +9,7 @@ from ..internal.MultiHoster import MultiHoster
 class DownsterNet(MultiHoster):
     __name__ = "DownsterNet"
     __type__ = "hoster"
-    __version__ = "0.01"
+    __version__ = "0.04"
     __status__ = "testing"
 
     __pattern__ = r'^unmatchable$'
@@ -25,26 +24,12 @@ class DownsterNet(MultiHoster):
     __license__ = "GPLv3"
     __authors__ = [(None, None)]
 
-    FILE_ERRORS = [("Error", r'{"state":"error"}'),
-                   ("Retry", r'{"state":"retry"}')]
-
-    API_URL = "https://downster.net/api/"
-
-    def api_response(self, method, get={}, **kwargs):
-        try:
-            res = self.load(self.API_URL + method,
-                            get=get,
-                            post=json.dumps(kwargs))
-        except BadHeader, e:
-            res = e.content
-
-        res = json.loads(res)
-
-        return res
+    def setup(self):
+        self.api = DownsterApi(self)
 
     def handle_free(self, pyfile):
-        api_data = self.api_response("download/get",
-                                     get={'url': pyfile.url})
+        api_data = self.api.request("download/get",
+                                    get={'url': pyfile.url})
 
         if not api_data['success']:
             if 'offline' in api_data['error']:

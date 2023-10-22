@@ -2,6 +2,7 @@
 import re
 import urlparse
 import os
+
 import pycurl
 
 from ..captcha.ReCaptcha import ReCaptcha
@@ -18,10 +19,10 @@ def convert_decimal_prefix(m):
 class UlozTo(SimpleHoster):
     __name__ = "UlozTo"
     __type__ = "hoster"
-    __version__ = "99.49"
+    __version__ = "99.52"
     __status__ = "testing"
 
-    __pattern__ = r'https?://(?:www\.)?(uloz\.to|ulozto\.(cz|sk|net)|bagruj\.cz|zachowajto\.pl|pornfile\.cz)/(?:live/)?(?P<ID>[!\w]+/[^/?]*)'
+    __pattern__ = r'https?://(?:www\.)?(uloz\.to|ulozto\.(cz|sk|net)|bagruj\.cz|zachowajto\.pl|pornfile\.cz|pinkfile\.cz)/(?:live/)?(?P<ID>[!\w]+/[^/?]*)'
 
     __config__ = [("activated", "bool", "Activated", True),
                   ("use_premium", "bool", "Use premium account if available", True),
@@ -43,14 +44,14 @@ class UlozTo(SimpleHoster):
     TEMP_OFFLINE_PATTERN = r"<title>500 - Internal Server Error</title>"
 
     URL_REPLACEMENTS = [("http://", "https://"),
-                        (r'(uloz\.to|ulozto\.(cz|sk|net)|bagruj\.cz|zachowajto\.pl|pornfile\.cz)', "ulozto.net")]
+                        (r'(uloz\.to|ulozto\.(cz|sk|net)|bagruj\.cz|zachowajto\.pl|pornfile\.cz|pinkfile\.cz)', "ulozto.net")]
 
     SIZE_REPLACEMENTS = [(r'([\d.]+)\s([kMG])B', convert_decimal_prefix)]
 
     CHECK_TRAFFIC = True
 
-    ADULT_PATTERN = r'PORNfile.cz'
-    PASSWD_PATTERN = r'<div class="passwordProtectedFile">'
+    ADULT_PATTERN = r'PINKfile.cz'
+    PASSWD_PATTERN = r'frm-passwordProtectedForm-password'
     VIPLINK_PATTERN = r'<a href=".+?\?disclaimer=1" class="linkVip">'
     TOKEN_PATTERN = r'<input type="hidden" name="_token_" .*?value="(.+?)"'
 
@@ -64,8 +65,8 @@ class UlozTo(SimpleHoster):
             adult = True
             self.log_info(_("Adult content confirmation needed"))
 
-            url = pyfile.url.replace("ulozto.net", "pornfile.cz")
-            self.load("https://pornfile.cz/porn-disclaimer",
+            url = pyfile.url.replace("ulozto.net", "pinkfile.cz")
+            self.load("https://pinkfile.cz/porn-disclaimer",
                       post={'agree': "Confirm",
                             '_do': "pornDisclaimer-submit"})
 
@@ -82,87 +83,91 @@ class UlozTo(SimpleHoster):
 
     def handle_free(self, pyfile):
         is_adult = self.adult_confirmation(pyfile)
-        domain = "https://pornfile.cz" if is_adult else "https://ulozto.net"
+        domain = "https://pinkfile.cz" if is_adult else "https://ulozto.net"
 
         #: Let's try to find direct download
         m = re.search(r'<a id="limitedDownloadButton".*?href="(.*?)"', self.data)
         if m:
             self.download(domain + m.group(1))
             return
-
+        
         m = re.search(r'<a .* data-href="(.*)" class=".*js-free-download-button-dialog.*?"', self.data)
         if not m:
             self.error(_("Free download button not found"))
 
-        pre_download_link = self.fixurl(m.group(1))
-
         self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With: XMLHttpRequest"])
-        
-        header = self.load(pre_download_link, just_header=True)
-
-        # in case we are redirected to file
-        if header["code"] == 302 and header["location"]:
-            self.log_debug("Slow download is not guided by CAPTCHA, downloading directly from %s" %  header['location'])
-            self.download(header['location'])
-            return
-
-        
-        self.data = self.load(pre_download_link)
-        if self.data.startswith("{"):
-            # it's json
-            msg = json.loads(self.data)
-            download_link = msg.get("slowDownloadLink")
-            if download_link:
-                self.download(download_link)
-            else:
-                self.error("Got JSON instead of captcha form - probably need recaptcha")
-
+        self.data = self.load(domain + m.group(1))
         self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With:"])
 
-        action, inputs = self.parse_html_form('id="frm-freeDownloadForm-form"')
+        if not self.data.startswith('{'):
+            action, inputs = self.parse_html_form('id="frm-freeDownloadForm-form"')
 
-        self.log_debug("inputs.keys = %s" % inputs.keys())
-        #: Get and decrypt captcha
-        if not all(key in inputs for key in ("captcha_value", "timestamp", "salt", "hash")):
-            self.error(_("Free download form does not contain required keys"))
-        #: New version - better to get new parameters (like captcha reload) because of image url - since 6.12.2013
+            self.log_debug("inputs.keys = %s" % inputs.keys())
+            #: Get and decrypt captcha
+            if all(key in inputs for key in (
+                    "captcha_value", "captcha_id", "captcha_key")):
+                #: Old version - last seen 9.12.2013
+                self.log_debug('Using "old" version')
 
+                captcha_value = self.captcha.decrypt(
+                    "https://img.uloz.to/captcha/%s.png" %
+                    inputs['captcha_id'])
+                self.log_debug(
+                    "CAPTCHA ID: " +
+                    inputs['captcha_id'] +
+                    ", CAPTCHA VALUE: " +
+                    captcha_value)
 
-        xapca = self.load("https://ulozto.net/reloadXapca.php",
-                            get={'rnd': timestamp()})
+                inputs.update({
+                    'captcha_id': inputs['captcha_id'],
+                    'captcha_key': inputs['captcha_key'],
+                    'captcha_value': captcha_value
+                })
 
-        # xapca = xapca.replace(
-        #     'sound":"',
-        #     'sound":"https:').replace(
-        #     'image":"',
-        #     'image":"https:')
-        self.log_debug("xapca: %s" % xapca)
+            elif all(key in inputs for key in ("captcha_value", "timestamp", "salt", "hash")):
+                #: New version - better to get new parameters (like captcha reload) because of image url - since 6.12.2013
+                self.log_debug('Using "new" version')
 
-        data = json.loads(xapca)
-        if self.config.get("captcha") == "Sound":
-            captcha_value = self.captcha.decrypt(
-                str(data['sound']), input_type=os.path.splitext(data['sound'])[1], ocr="UlozTo")
+                xapca = self.load("https://ulozto.net/reloadXapca.php",
+                                  get={'rnd': timestamp()})
+                self.log_debug("xapca: %s" % xapca)
+
+                data = json.loads(xapca)
+                if self.config.get("captcha") == "Sound":
+                    captcha_value = self.captcha.decrypt(
+                        str(data['sound']), input_type=os.path.splitext(data['sound'])[1], ocr="UlozTo")
+                else:
+                    captcha_value = self.captcha.decrypt(data['image'])
+                self.log_debug(
+                    "CAPTCHA HASH: " +
+                    data['hash'],
+                    "CAPTCHA SALT: %s" %
+                    data['salt'],
+                    "CAPTCHA VALUE: " +
+                    captcha_value)
+
+                inputs.update({
+                    'timestamp': data['timestamp'],
+                    'salt': data['salt'],
+                    'hash': data['hash'],
+                    'captcha_value': captcha_value
+                })
+
+            elif all(key in inputs for key in ('do', 'cid', 'ts', 'sign', '_token_', 'sign_a', 'adi')):
+                # New version 1.4.2016
+                self.log_debug('Using "new" > 1.4.2016')
+
+                inputs.update({'do': inputs['do'], '_token_': inputs['_token_'],
+                               'ts': inputs['ts'], 'cid': inputs['cid'],
+                               'adi': inputs['adi'], 'sign_a': inputs['sign_a'], 'sign': inputs['sign']})
+
+            else:
+                self.error(_("CAPTCHA form changed"))
+
+            jsvars = self.get_json_response(domain + action, inputs)
+
         else:
-            captcha_value = self.captcha.decrypt(data['image'])
-        self.log_debug(
-            "CAPTCHA HASH: " +
-            data['hash'],
-            "CAPTCHA SALT: %s" %
-            data['salt'],
-            "CAPTCHA VALUE: " +
-            captcha_value)
-
-        inputs.update({
-            'timestamp': data['timestamp'],
-            'salt': data['salt'],
-            'hash': data['hash'],
-            'captcha_value': captcha_value
-        })
-
-        jsvars = self.get_json_response(domain + action, inputs)
-
-        if 'redirectDialogContent' in jsvars:
-            self.log_debug("We do not have download link but cat try recaptcha")
+            jsvars = json.loads(self.data)
             redirect = jsvars.get('redirectDialogContent')
             if redirect:
                 self.data = self.load(domain + redirect)
@@ -177,19 +182,15 @@ class UlozTo(SimpleHoster):
                     self.error(_("ReCaptcha key not found"))
 
                 self.captcha = recaptcha
-                response, challenge = recaptcha.challenge(captcha_key)
+                response = recaptcha.challenge(captcha_key)
 
                 inputs['g-recaptcha-response'] = response
 
                 jsvars = self.get_json_response(domain + action, inputs)
                 if 'slowDownloadLink' not in jsvars:
                     self.retry_captcha()
-        if 'slowDownloadLink' in jsvars:
-            self.log_debug("Got download link {}".format(jsvars['slowDownloadLink']))
-            self.download(jsvars['slowDownloadLink'])
-        else:
-            self.error(_("Cannot get download link"))
-    
+
+        self.download(jsvars['slowDownloadLink'])
 
     def handle_premium(self, pyfile):
         m = re.search("/file/(.+)/", pyfile.url)
@@ -199,6 +200,7 @@ class UlozTo(SimpleHoster):
         premium_url = urlparse.urljoin("https://ulozto.net/quickDownload/", m.group(1))
         self.download(premium_url)
 
+
     def check_errors(self):
         if self.PASSWD_PATTERN in self.data:
             password = self.get_password()
@@ -206,9 +208,9 @@ class UlozTo(SimpleHoster):
             if password:
                 self.log_info(_("Password protected link, trying ") + password)
                 self.data = self.load(self.pyfile.url,
-                                      get={'do': "passwordProtectedForm-submit"},
                                       post={'password': password,
-                                            'password_send': 'Send'})
+                                            'password_send': 'Send',
+                                            '_do': 'passwordProtectedForm-submit'})
 
                 if self.PASSWD_PATTERN in self.data:
                     self.fail(_("Wrong password"))

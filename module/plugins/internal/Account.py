@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 
-import random
+import copy
 import threading
 import time
 
-from .misc import (Periodical, compare_time, decode, isiterable, lock,
-                   parse_size)
+from .misc import Periodical, compare_time, decode, isiterable, lock, parse_size
 from .Plugin import Plugin, Skip
 
 
 class Account(Plugin):
     __name__ = "Account"
     __type__ = "account"
-    __version__ = "0.86"
+    __version__ = "0.90"
     __status__ = "stable"
 
     __description__ = """Base account plugin"""
@@ -79,7 +78,7 @@ class Account(Plugin):
 
     def setup(self):
         """
-        Setup for enviroment and other things, called before logging (possibly more than one time)
+        Setup for environment and other things, called before logging (possibly more than one time)
         """
         pass
 
@@ -93,16 +92,18 @@ class Account(Plugin):
         pass
 
     def login(self):
-        if not self.req:
+        self.clean()
+        self.sync()
+
+        self.info["login"]["stats"][0] += 1
+        if self.info["login"]["stats"][0] == 1:
             self.log_info(_("Login user `%s`...") % self.user)
         else:
             self.log_info(_("Relogin user `%s`...") % self.user)
-            self.clean()
 
         self.req = self.pyload.requestFactory.getRequest(
             self.classname, self.user)
 
-        self.sync()
         self.setup()
 
         timestamp = time.time()
@@ -136,6 +137,15 @@ class Account(Plugin):
 
             return bool(self.info['login']['valid'])
 
+
+    def logout(self):
+        """
+        Invalidate the account timestamp so relogin will be forced next time.
+        """
+        self.sync()
+        self.info["login"]["timestamp"] = 0
+        self.syncback()
+
     #@TODO: Recheck in 0.4.10
     def syncback(self):
         """
@@ -162,7 +172,7 @@ class Account(Plugin):
             d = {'login': {}, 'data': {}}
 
             for k, v in u.items():
-                if k in ('password', 'timestamp', 'valid'):
+                if k in ('password', 'timestamp', "stats", 'valid'):
                     d['login'][k] = v
                 else:
                     d['data'][k] = v
@@ -188,8 +198,6 @@ class Account(Plugin):
         Retrieve account infos for an user, do **not** overwrite this method!
         just use it to retrieve infos in hoster plugins. see `grab_info`
 
-        :param user: username
-        :param relogin: reloads cached account information
         :return: dictionary with information
         """
         if not self.logged:
@@ -245,7 +253,8 @@ class Account(Plugin):
         and retrieving account information for user
 
         :param user:
-        :param req: `Request` instance
+        :param password:
+        :param data:
         :return:
         """
         pass
@@ -299,6 +308,7 @@ class Account(Plugin):
              'password': password or "",
              'plugin': self.pyload.accountManager.getAccountPlugin(self.classname),
              'premium': None,
+             "stats": [0, 0],  #: login_count, chosen_time
              'timestamp': 0,
              'trafficleft': None,
              'type': self.__name__,
@@ -335,20 +345,29 @@ class Account(Plugin):
     def removeAccount(self, user):
         self.log_info(_("Removing user `%s`...") % user)
         self.accounts.pop(user, None)
+        # self.pyload.requestFactory.remove_cookie_jar(self.classname, user)
+        self.pyload.requestFactory.cookiejars.pop((self.classname, user), None)
         if user is self.user:
             self.choose()
 
     @lock
     def select(self):
+        def hide(secret):
+            hidden = secret[:3] + "*******"
+            return hidden
+
         free_accounts = {}
         premium_accounts = {}
 
         for user in self.accounts:
-            info = self.accounts[user]['plugin'].get_info()
-            data = info['data']
+            if not self.accounts[user]["plugin"].choose(user):
+                continue
 
+            info = self.accounts[user]["plugin"].get_info()
             if not info['login']['valid']:
                 continue
+
+            data = info["data"]
 
             if data['options'].get('time'):
                 time_data = ""
@@ -361,41 +380,37 @@ class Account(Plugin):
 
                 except Exception:
                     self.log_warning(_("Invalid time format `%s` for account `%s`, use 1:22-3:44")
-                                     % (user, time_data))
+                                     % (hide(user), time_data))
 
             if data['trafficleft'] == 0:
                 self.log_warning(
                     _("Not using account `%s` because the account has no traffic left") %
-                    user)
+                    hide(user))
                 continue
 
             if time.time() > data['validuntil'] > 0:
                 self.log_warning(
                     _("Not using account `%s` because the account has expired") %
-                    user)
+                    hide(user))
                 continue
 
             if data['premium']:
-                premium_accounts[user] = info
+                premium_accounts[user] = copy.copy(info)
 
             else:
-                free_accounts[user] = info
+                free_accounts[user] = copy.copy(info)
 
         account_list = (premium_accounts or free_accounts).items()
 
         if not account_list:
             return None, None
 
-        validuntil_list = [(user, info) for user, info in account_list
-                           if info['data']['validuntil']]
+        #: Choose the oldest used account
+        chosen_account = sorted(account_list, key=lambda x: x[1]["login"]["stats"][1])[0]
+        self.accounts[chosen_account[0]]["stats"][1] = time.time()
 
-        if not validuntil_list:
-            # @TODO: Random account?! Rewrite in 0.4.10
-            return random.choice(account_list)
-
-        return sorted(validuntil_list,
-                      key=lambda a: a[1]['data']['validuntil'],
-                      reverse=True)[0]
+        self.log_debug("Using account %s" % (hide(chosen_account[0])))
+        return chosen_account
 
     @lock
     def choose(self, user=None):
@@ -411,22 +426,21 @@ class Account(Plugin):
                 user, _("User does not exists"))
             return False
 
-        if self.req and user == self.user:
-            return True
-
-        self.user = user
-        self.info.clear()
-        self.clean()
+        else:
+            if self.req and user == self.user:
+                return True
 
         if user is None:
             return False
 
         else:
+            self.user = user
+            self.info.clear()
+            self.req.close()
+            self.req = self.pyload.requestFactory.getRequest(self.classname, self.user)
+
             if not self.logged:
                 self.relogin()
-            else:
-                self.req = self.pyload.requestFactory.getRequest(
-                    self.classname, self.user)
 
             return True
 

@@ -11,7 +11,7 @@ from ..captcha.ReCaptcha import ReCaptcha
 class MultiUpOrg(SimpleCrypter):
     __name__ = "MultiUpOrg"
     __type__ = "crypter"
-    __version__ = "0.15"
+    __version__ = "0.18"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:www\.)?multiup\.(?:org|eu)/(?:en/|fr/)?(?:(?P<TYPE>project|download|mirror)/)?\w+(?:/\w+)?'
@@ -29,14 +29,21 @@ class MultiUpOrg(SimpleCrypter):
                    ("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
 
     NAME_PATTERN = r'<title>.*(?:Project|Projet|Download|Télécharger) (?P<N>.+?) (\(|- )'
-    OFFLINE_PATTERN = r'File not found'
+    OFFLINE_PATTERN = r'The requested file could not be found'
     TEMP_OFFLINE_PATTERN = r'^unmatchable$'
     DIRECT_LINK = False
 
-    URL_REPLACEMENTS = [(r'https?://(?:www\.)?multiup\.(?:org|eu)/', "http://www.multiup.org/"),
+    URL_REPLACEMENTS = [(r'https?://(?:www\.)?multiup\.(?:org|eu)/', "https://www.multiup.org/"),
                         (r'/fr/', "/en/")]
 
     COOKIES = [("multiup.org", "_locale", "en")]
+
+    def decrypt(self, pyfile):
+        self._prepare()
+        self._preload()
+
+        links = self.get_links()
+        self.packages = [(pyfile.package().name, links, pyfile.package().folder)]
 
     def get_links(self):
         m_type = self.info['pattern']['TYPE']
@@ -50,14 +57,14 @@ class MultiUpOrg(SimpleCrypter):
         elif m_type in ("download", None):
             url, inputs = self.parse_html_form()
             if inputs is not None:
-                self.data = self.load(urlparse.urljoin("http://www.multiup.org/", url),
+                self.data = self.load(urlparse.urljoin("https://www.multiup.org/", url),
                                       post=inputs)
 
         hosts_data = {}
         for _a in re.findall(r'<button (.+?) class="host btn btn-md btn-default btn-block btn-3d hvr-bounce-to-right">', self.data, re.M):
             validity = re.search(r'validity="(\w+)"', _a).group(1)
             if validity in ("valid", "unknown"):
-                host = re.search(r'nameHost="(.+?)"', _a).group(1)
+                host = re.search(r'namehost="(.+?)"', _a).group(1)
                 url = re.search(r'link="(.+?)"', _a).group(1)
                 hosts_data[host] = url
 

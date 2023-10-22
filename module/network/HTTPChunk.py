@@ -28,7 +28,7 @@ from posixpath import basename as posixpath_basename
 
 import pycurl
 from HTTPRequest import HTTPRequest
-from module.utils import decode, fs_encode
+from module.utils import decode, fs_encode, parse_name
 
 
 class WrongFormat(Exception):
@@ -230,7 +230,7 @@ class HTTPChunk(HTTPRequest):
                 self.p.size = int(size.group(1))
                 self.p.chunkSupport = True
 
-        self.headerParsed = True
+            self.headerParsed = True
 
         return None  #: All is fine
 
@@ -272,10 +272,14 @@ class HTTPChunk(HTTPRequest):
 
     def parseHeader(self):
         """parse data from recieved header"""
+        location = None
         for orgline in self.header.splitlines():
             line = orgline.strip().lower()
             if line.startswith("accept-ranges") and "bytes" in line:
                 self.p.chunkSupport = True
+
+            elif line.startswith("location"):
+                location = orgline.split(":", 1)[1].strip()
 
             elif line.startswith("content-disposition"):
                 disposition_value = orgline.split(":", 1)[1].strip()
@@ -332,6 +336,13 @@ class HTTPChunk(HTTPRequest):
                             except UnicodeEncodeError:
                                 self.log.warning("Content-Disposition: | error: Error when decoding string from iso-8859-1.")
                                 continue
+
+                    elif disposition_type.lower() == "attachment":
+                        if location is not None:
+                            fname = parse_name(location)
+                        else:
+                            fname = parse_name(self.p.url)
+
                     else:
                         continue
 

@@ -3,7 +3,6 @@
 import re
 
 from module.network.HTTPRequest import BadHeader
-from module.network.RequestFactory import getURL as get_url
 from module.PyFile import PyFile
 
 from ..captcha.ReCaptcha import ReCaptcha
@@ -15,7 +14,7 @@ from ..internal.misc import json
 class Keep2ShareCc(Account):
     __name__ = "Keep2ShareCc"
     __type__ = "account"
-    __version__ = "0.17"
+    __version__ = "0.21"
     __status__ = "testing"
 
     __description__ = """Keep2Share.cc account plugin"""
@@ -24,15 +23,14 @@ class Keep2ShareCc(Account):
                    ("Walter Purcaro", "vuolter@gmail.com"),
                    ("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
 
-    RECAPTCHA_KEY = "6LcYcN0SAAAAABtMlxKj7X0hRxOY8_2U86kI1vbb"
+    RECAPTCHA_KEY = "6LcOsNIaAAAAABzCMnQw7u0u8zd1mrqY6ibFtto8"
 
     API_URL = "https://keep2share.cc/api/v2/"
     #: See https://keep2share.github.io/api/ https://github.com/keep2share/api
 
-    @classmethod
-    def api_response(cls, method, **kwargs):
-        html = get_url(cls.API_URL + method,
-                       post=json.dumps(kwargs))
+    def api_response(self, method, **kwargs):
+        html = self.load(self.API_URL + method,
+                         post=json.dumps(kwargs))
         return json.loads(html)
 
     def grab_info(self, user, password, data):
@@ -75,7 +73,7 @@ class Keep2ShareCc(Account):
                             self.log_error(_("Request reCAPTCHA API failed"))
                             self.fail_login(_("Request reCAPTCHA API failed"))
 
-                        re_captcha_response, _ = self.captcha.challenge(self.RECAPTCHA_KEY, version="2js", secure_token=False)
+                        re_captcha_response = self.captcha.challenge(self.RECAPTCHA_KEY, version="2js", secure_token=False)
                         try:
                             json_data = self.api_response("login",
                                                           username=user,

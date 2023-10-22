@@ -15,7 +15,7 @@ from ..internal.misc import json, parse_size, search_pattern
 class GoogledriveCom(Hoster):
     __name__ = "GoogledriveCom"
     __type__ = "hoster"
-    __version__ = "0.32"
+    __version__ = "0.35"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:www\.)?(?:drive|docs)\.google\.com/(?:file/d/|uc\?.*id=)(?P<ID>[-\w]+)'
@@ -33,7 +33,7 @@ class GoogledriveCom(Hoster):
     INFO_PATTERN = r'<span class="uc-name-size"><a href="[^"]+">(?P<N>.+?)</a> \((?P<S>[\d.,]+)(?P<U>[\w^_]+)\)</span>'
 
     API_URL = "https://www.googleapis.com/drive/v3/"
-    API_KEY = "AIzaSyAcA9c4evtwSY1ifuvzo6HKBkeot5Bk_U4"
+    API_KEY = "AIzaSyB68u-qFPP9oBJpo1DWAPFE_VD2Sfy9hpk"
 
     def setup(self):
         self.multiDL = True
@@ -63,12 +63,14 @@ class GoogledriveCom(Hoster):
                                "Error code: %s" % e.code)
             return None
 
-    def api_download(self):
+    def api_download(self, disposition):
         try:
             self.download("%s%s/%s" % (self.API_URL, "files", self.info['pattern']['ID']),
                           get={'alt': "media",
-                               # 'acknowledgeAbuse': "true",
-                               'key': self.API_KEY})
+                               "acknowledgeAbuse": "true",
+                               "supportsAllDrives": "true",
+                               'key': self.API_KEY},
+                          disposition=disposition)
 
         except BadHeader, e:
             if e.code == 404:
@@ -82,12 +84,14 @@ class GoogledriveCom(Hoster):
 
     def process(self, pyfile):
         disposition = False
-        self.data = self.load(pyfile.url)
-        json_data = self.api_response("files/" + self.info['pattern']['ID'], fields="md5Checksum,name,size")
+        json_data = self.api_response("files/" + self.info['pattern']['ID'],
+                                      fields="md5Checksum,name,size",
+                                      supportsAllDrives="true")
 
         if json_data is None:
             self.fail("API error")
 
+        self.data = self.load(pyfile.url, ref=False)
         if 'error' in json_data:
             if json_data['error']['code'] == 404:
                 if "Virus scan warning" not in self.data:
@@ -110,7 +114,7 @@ class GoogledriveCom(Hoster):
             self.info['md5'] = json_data['md5Checksum']
 
         # Somehow, API downloads are sacrificially slow compared to "normal" download :(
-        # self.api_download()
+        # self.api_download(disposition)
 
         for _i in range(2):
             m = re.search(r'"([^"]+uc\?.*?)"', self.data)

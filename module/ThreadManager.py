@@ -68,12 +68,11 @@ class ThreadManager:
         pycurl.global_init(pycurl.GLOBAL_DEFAULT)
 
         for i in range(0, self.core.config.get("download", "max_downloads")):
-            self.createThread()
+            self.createDownloadThread()
 
 
-    def createThread(self):
+    def createDownloadThread(self):
         """create a download thread"""
-
         thread = PluginThread.DownloadThread(self)
         self.threads.append(thread)
 
@@ -227,7 +226,7 @@ class ThreadManager:
         if len(self.threads) == self.core.config.get("download", "max_downloads"):
             return True
         elif len(self.threads) < self.core.config.get("download", "max_downloads"):
-            self.createThread()
+            self.createDownloadThread()
         else:
             free = [x for x in self.threads if not x.active]
             if free:
@@ -255,7 +254,7 @@ class ThreadManager:
 
         free = [x for x in self.threads if not x.active]
 
-        inuse = set([(x.active.pluginname,self.getLimit(x)) for x in self.threads if x.active and x.active.hasPlugin() and x.active.plugin.account])
+        inuse = set([(x.active.pluginname,self.getLimit(x)) for x in self.threads if x.active and x.active.hasPlugin()])
         inuse = map(lambda x : (x[0], x[1], len([y for y in self.threads if y.active and y.active.pluginname == x[0]])) ,inuse)
         onlimit = [x[0] for x in inuse if x[1] > 0 and x[2] >= x[1]]
 
@@ -284,6 +283,7 @@ class ThreadManager:
                     thread = free[0]
                     #self.downloaded += 1
 
+                    job.setStatus("starting")
                     thread.put(job)
                 else:
                     #put job back
@@ -291,7 +291,7 @@ class ThreadManager:
                         self.core.files.jobCache[occ] = []
                     self.core.files.jobCache[occ].append(job.id)
 
-                    #check for decrypt jobs
+                    # check for decrypt jobs
                     job = self.core.files.getDecryptJob()
                     if job:
                         job.initPlugin()
@@ -302,8 +302,29 @@ class ThreadManager:
                 thread = PluginThread.DecrypterThread(self, job)
 
     def getLimit(self, thread):
-        limit = thread.active.plugin.account.getAccountData(thread.active.plugin.user)["options"].get("limitDL",["0"])[0]
-        return int(limit)
+        if thread.active.plugin.account:
+            account_limit = max(
+                int(
+                    thread.active.plugin.account.getAccountData(
+                        thread.active.plugin.account.user
+                    )["options"].get("limitDL", ["0"])[0]
+                ),
+                0,
+            )
+        else:
+            account_limit = 0
+
+        plugin_limit = (
+            max(thread.active.plugin.limitDL, 0)
+            if hasattr(thread.active.plugin, "limitDL")
+            else 0
+        )
+        if account_limit > 0 and plugin_limit > 0:
+            limit = min(account_limit, plugin_limit)
+        else:
+            limit = account_limit or plugin_limit
+
+        return limit
 
     def cleanup(self):
         """do global cleanup, should be called when finished with pycurl"""

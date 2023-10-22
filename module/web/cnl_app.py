@@ -6,19 +6,19 @@ from binascii import unhexlify
 from urllib import unquote
 
 from bottle import HTTPError, request, route
-from module.utils import save_join
+from module.utils import decode, save_join
 from webinterface import DL_ROOT, JS, PYLOAD
 
 try:
     from Crypto.Cipher import AES
-except:
+except ImportError:
     pass
 
 
 def local_check(function):
     def _view(*args, **kwargs):
-        if request.environ.get('REMOTE_ADDR', "0") in ('127.0.0.1', 'localhost') \
-        or request.environ.get('HTTP_HOST','0') == '127.0.0.1:9666':
+        if request.environ.get('REMOTE_ADDR', "0") in ('127.0.0.1', '::ffff:127.0.0.1', '::1', 'localhost') \
+        or request.environ.get('HTTP_HOST','0') in ('127.0.0.1:9666', '[::1]:9666'):
             return function(*args, **kwargs)
         else:
             return HTTPError(403, "Forbidden")
@@ -36,20 +36,27 @@ def flash(id="0"):
 @route("/flash/add", method="POST")
 @local_check
 def add():
-    package = request.forms.get("package", request.forms.get("source", request.POST.get('referer', None)))
-    urls = [x.decode('latin1').strip() for x in request.POST['urls'].split("\n") if x.decode('latin1').strip()]
+    package = decode(request.forms.get("package", request.forms.get("source", request.forms.get('referer', None))))
+    urls = [x.decode('latin1').strip()
+            for x in request.forms['urls'].replace(' ', '\n').split("\n")
+            if x.decode('latin1').strip()]
 
     if package:
-        PYLOAD.addPackage(package, urls, 0)
+        pack = PYLOAD.addPackage(package, urls, 0)
     else:
-        PYLOAD.generateAndAddPackages(urls, 0)
+        pack = PYLOAD.generateAndAddPackages(urls, 0)
+
+    pw = request.forms.get("passwords")
+    if pw:
+        pw = pw.decode("utf8", "ignore")
+        PYLOAD.setPackageData(pack, {"password": pw})
 
     return ""
 
 @route("/flash/addcrypted", method="POST")
 @local_check
 def addcrypted():
-    package = request.forms.get("package", request.forms.get("source", request.POST.get('referer', None)))
+    package = decode(request.forms.get("package", request.forms.get("source", request.forms.get('referer', None))))
     dlc = request.forms['crypted'].replace(" ", "+")
 
     dlc_path = save_join(DL_ROOT, package.replace("/", "").replace("\\", "").replace(":", "") + ".dlc")
@@ -57,19 +64,25 @@ def addcrypted():
     dlc_file.write(dlc)
     dlc_file.close()
 
+    pw = request.forms.get("passwords")
+
     try:
-        PYLOAD.addPackage(package, [dlc_path], 0)
+        pack = PYLOAD.addPackage(package, [dlc_path], 0)
     except:
         return HTTPError()
     else:
+        if pw:
+            pw = pw.decode("utf8", "ignore")
+            PYLOAD.setPackageData(pack, {"password": pw})
         return "success\r\n"
 
 @route("/flash/addcrypted2", method="POST")
 @local_check
 def addcrypted2():
-    package = request.forms.get("package", request.forms.get("source", request.POST.get('referer', None)))
+    package = decode(request.forms.get("package", request.forms.get("source", request.forms.get('referer', None))))
     crypted = request.forms["crypted"]
     jk = request.forms["jk"]
+    pw = request.forms.get("passwords")
 
     crypted = standard_b64decode(unquote(crypted.replace(" ", "+")))
     if JS:
@@ -80,7 +93,7 @@ def addcrypted2():
         try:
             jk = re.findall(r"return ('|\")(.+)('|\")", jk)[0][1]
         except:
-        ## Test for some known js functions to decode
+            # Test for some known js functions to decode
             if jk.find("dec") > -1 and jk.find("org") > -1:
                 org = re.findall(r"var org = ('|\")([^\"']+)", jk)[0][1]
                 jk = list(org)
@@ -104,9 +117,13 @@ def addcrypted2():
 
     try:
         if package:
-            PYLOAD.addPackage(package, urls, 0)
+            pack = PYLOAD.addPackage(package, urls, 0)
         else:
-            PYLOAD.generateAndAddPackages(urls, 0)
+            pack = PYLOAD.generateAndAddPackages(urls, 0)
+
+        if pw:
+            pw = pw.decode("utf8", "ignore")
+            PYLOAD.setPackageData(pack, {"password": pw})
     except:
         return "failed can't add"
     else:
@@ -122,8 +139,8 @@ def flashgot():
         return HTTPError()
 
     autostart = int(request.forms.get('autostart', 0))
-    package = request.forms.get('package', None)
-    urls = [x.decode('latin1').strip() for x in request.POST['urls'].split("\n") if x.decode('latin1').strip()]
+    package = decode(request.forms.get('package', None))
+    urls = [x.decode('latin1').strip() for x in request.forms['urls'].split("\n") if x.decode('latin1').strip()]
     folder = request.forms.get('dir', None)
 
     if package:

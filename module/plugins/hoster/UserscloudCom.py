@@ -1,42 +1,13 @@
 # -*- coding: utf-8 -*-
 
-import re
-
-from module.network.CookieJar import CookieJar
-from module.network.HTTPRequest import HTTPRequest
-
-from ..internal.SimpleHoster import SimpleHoster
+from ..internal.misc import BIGHTTPRequest
+from ..internal.XFSHoster import XFSHoster
 
 
-class BIGHTTPRequest(HTTPRequest):
-    """
-    Overcome HTTPRequest's load() size limit to allow
-    loading very big web pages by overrding HTTPRequest's write() function
-    """
-
-    # @TODO: Add 'limit' parameter to HTTPRequest in v0.4.10
-    def __init__(self, cookies=None, options=None, limit=1000000):
-        self.limit = limit
-        HTTPRequest.__init__(self, cookies=cookies, options=options)
-
-    def write(self, buf):
-        """ writes response """
-        if self.limit and self.rep.tell() > self.limit or self.abort:
-            rep = self.getResponse()
-            if self.abort:
-                raise Abort()
-            f = open("response.dump", "wb")
-            f.write(rep)
-            f.close()
-            raise Exception("Loaded Url exceeded limit")
-
-        self.rep.write(buf)
-
-
-class UserscloudCom(SimpleHoster):
+class UserscloudCom(XFSHoster):
     __name__ = "UserscloudCom"
     __type__ = "hoster"
-    __version__ = "0.09"
+    __version__ = "0.12"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:www\.)?userscloud\.com/(?P<ID>\w{12})'
@@ -49,6 +20,8 @@ class UserscloudCom(SimpleHoster):
     __description__ = """Userscloud.com hoster plugin"""
     __license__ = "GPLv3"
     __authors__ = [("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
+
+    PLUGIN_DOMAIN = "userscloud.com"
 
     INFO_PATTERN = r'<a href="https://userscloud.com/.+?" target="_blank">(?P<N>.+?) - (?P<S>[\d.,]+) (?P<U>[\w^_]+)</a>'
     OFFLINE_PATTERN = r'The file you are trying to download is no longer available'
@@ -67,19 +40,6 @@ class UserscloudCom(SimpleHoster):
             pass
 
         self.req.http = BIGHTTPRequest(
-            cookies=CookieJar(None),
+            cookies=self.req.cj,
             options=self.pyload.requestFactory.getOptions(),
-            limit=300000)
-
-
-    def handle_free(self, pyfile):
-        url, inputs = self.parse_html_form('name="F1"')
-        if not inputs:
-            return
-
-        self.data = self.load(pyfile.url, post=inputs)
-
-        m = re.search(self.LINK_FREE_PATTERN, self.data)
-        if m is not None:
-            self.link = m.group(1)
-
+            limit=2000000)

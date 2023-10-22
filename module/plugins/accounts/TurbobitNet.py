@@ -10,7 +10,7 @@ from ..internal.misc import parse_html_form, set_cookie
 class TurbobitNet(Account):
     __name__ = "TurbobitNet"
     __type__ = "account"
-    __version__ = "0.12"
+    __version__ = "0.14"
     __status__ = "testing"
 
     __description__ = """TurbobitNet account plugin"""
@@ -50,6 +50,7 @@ class TurbobitNet(Account):
         inputs['user[login]'] = user
         inputs['user[pass]'] = password
         inputs['user[submit]'] = "Sign in"
+        inputs["user[memory]"] = "on"
 
         if inputs.get('user[captcha_type]'):
             self.fail_login(_("Logging in with captcha is not supported, please disable catcha in turbobit's account settings"))

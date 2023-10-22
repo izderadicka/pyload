@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import re
+
 from ..captcha.ReCaptcha import ReCaptcha
 from ..internal.misc import json
 from ..internal.SimpleHoster import SimpleHoster
@@ -8,7 +10,7 @@ from ..internal.SimpleHoster import SimpleHoster
 class UploadgigCom(SimpleHoster):
     __name__ = "UploadgigCom"
     __type__ = "hoster"
-    __version__ = "0.06"
+    __version__ = "0.10"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:www\.)?uploadgig.com/file/download/\w+'
@@ -31,6 +33,15 @@ class UploadgigCom(SimpleHoster):
     OFFLINE_PATTERN = r'File not found'
 
     def handle_free(self, pyfile):
+        m = re.search(
+            r"<script>window\[String\.fromCharCode\(window\['m'\+'ax_upload_limi'\+'t'\]\)\] = (.+?);</script>",
+            self.data,
+        )
+        if m is None:
+            self.error(_("f pattern not found"))
+
+        f = self.js.eval(m.group(1))
+
         url, inputs = self.parse_html_form('id="dl_captcha_form"')
         if inputs is None:
             self.error(_("Free download form not found"))
@@ -42,7 +53,7 @@ class UploadgigCom(SimpleHoster):
             self.error(_("ReCaptcha key not found"))
 
         self.captcha = recaptcha
-        response, challenge = recaptcha.challenge(captcha_key)
+        response = recaptcha.challenge(captcha_key)
 
         inputs['g-recaptcha-response'] = response
         self.data = self.load(self.fixurl(url),
@@ -68,9 +79,9 @@ class UploadgigCom(SimpleHoster):
             except:
                 self.fail(_("Illegal response from the server"))
 
-            if any([_x not in res for _x in ('cd', 'fopg', 'fghre')]):
+            if any([_x not in res for _x in ('cd', 'sp', 'q', 'id')]):
                 self.fail(_("Illegal response from the server"))
 
             self.wait(res['cd'])
 
-            self.link = "http://" + res['fopg'] + res['fghre'] +"/dlfile"
+            self.link = res['sp'] + "id=" + str(res['id'] - int(f)) + "&" + res['q']

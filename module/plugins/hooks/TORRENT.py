@@ -8,7 +8,7 @@ from ..internal.Addon import Addon
 class TORRENT(Addon):
     __name__ = "TORRENT"
     __type__ = "hook"
-    __version__ = "0.05"
+    __version__ = "0.07"
     __status__ = "testing"
 
     __config__ = [("activated", "bool", "Activated", False),
@@ -32,11 +32,8 @@ class TORRENT(Addon):
 
     def plugins_updated(self, updated_plugins):
         if self.torrent_plugin != "None":
-            plugin_type, plugin_name = self.torrent_plugin.split(':')
-            plugin_type = "crypter" if plugin_type == "c" else "hoster"
-            if (plugin_type, plugin_name) in updated_plugins:
-                self._remove_association(self.torrent_plugin)
-                self._associate(self.torrent_plugin)
+            self._remove_association(self.torrent_plugin)
+            self._associate(self.torrent_plugin)
 
     def config_changed(self, *args):
         if args[3] == "plugin" and args[0] == "TORRENT" and args[1] == "torrent_plugin" and args[2] != self.torrent_plugin:
@@ -56,24 +53,24 @@ class TORRENT(Addon):
             plugin_type, plugin_name = plugin.split(':')
             plugin_type = "crypter" if plugin_type == "c" else "hoster"
 
-            dict = self.pyload.pluginManager.plugins['container']['TORRENT']
-            dict['pattern'] = r'(?!file://).+\.(?:torrent|magnet)'
-            dict['re'] = re.compile(dict['pattern'])
+            hdict = self.pyload.pluginManager.plugins['container']['TORRENT']
+            hdict['pattern'] = r'(?!(?:file|https?)://).+\.(?:torrent|magnet)'
+            hdict['re'] = re.compile(hdict['pattern'])
 
-            dict = self.pyload.pluginManager.plugins[plugin_type][plugin_name]
-            dict['pattern'] = r'(?:file|https?)://.+\.torrent|magnet:\?.+'
-            dict['re'] = re.compile(dict['pattern'])
+            hdict = self.pyload.pluginManager.plugins[plugin_type][plugin_name]
+            hdict['pattern'] = r'(?:file|https?)://.+\.torrent|magnet:\?.+'
+            hdict['re'] = re.compile(hdict['pattern'])
 
     def _remove_association(self, plugin):
         if plugin != "None":
             plugin_type, plugin_name = plugin.split(':')
             plugin_type = "crypter" if plugin_type == "c" else "hoster"
 
-            dict = self.pyload.pluginManager.plugins[plugin_type][plugin_name]
-            dict['pattern'] = r'^unmatchable$'
-            dict['re'] = re.compile(dict['pattern'])
+            hdict = self.pyload.pluginManager.plugins[plugin_type][plugin_name]
+            hdict['pattern'] = r'^unmatchable$'
+            hdict['re'] = re.compile(hdict['pattern'])
 
-            dict = self.pyload.pluginManager.plugins['container']['TORRENT']
-            dict['pattern'] = r'(?:file|https?)://.+\.torrent|magnet:\?.+|(?!file://).+\.(torrent|magnet)'
-            dict['re'] = re.compile(dict['pattern'])
+            hdict = self.pyload.pluginManager.plugins['container']['TORRENT']
+            hdict['pattern'] = r'(?:file|https?)://.+\.torrent|magnet:\?.+|(?!(?:file|https?)://).+\.(?:torrent|magnet)'
+            hdict['re'] = re.compile(hdict['pattern'])
 

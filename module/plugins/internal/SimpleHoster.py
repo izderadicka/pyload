@@ -5,7 +5,6 @@ from __future__ import with_statement
 import re
 
 from module.network.HTTPRequest import BadHeader
-from module.network.RequestFactory import getURL as get_url
 
 from .Hoster import Hoster
 from .misc import fs_encode, parse_name, parse_size, parse_time, replace_patterns, search_pattern
@@ -14,7 +13,7 @@ from .misc import fs_encode, parse_name, parse_size, parse_time, replace_pattern
 class SimpleHoster(Hoster):
     __name__ = "SimpleHoster"
     __type__ = "hoster"
-    __version__ = "2.31"
+    __version__ = "2.42"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -129,14 +128,12 @@ class SimpleHoster(Hoster):
                    ('Request error', r'([Aa]n error occured while processing your request)'),
                    ('Html file', r'\A\s*<!DOCTYPE html')]
 
-    @classmethod
-    def api_info(cls, url):
+    def api_info(self, url):
         return {}
 
-    @classmethod
-    def get_info(cls, url="", html=""):
-        info = super(SimpleHoster, cls).get_info(url)
-        info.update(cls.api_info(url))
+    def get_info(self, url="", html=""):
+        info = super(SimpleHoster, self).get_info(url)
+        info.update(self.api_info(url))
 
         if not html and info['status'] != 2:
             if not url:
@@ -145,7 +142,7 @@ class SimpleHoster(Hoster):
 
             elif info['status'] in (3, 7):
                 try:
-                    html = get_url(url, cookies=cls.COOKIES, decode=cls.TEXT_ENCODING)
+                    html = self.load(url, cookies=self.COOKIES, decode=self.TEXT_ENCODING)
 
                 except BadHeader, e:
                     info['error'] = "%d: %s" % (e.code, e.content)
@@ -153,17 +150,17 @@ class SimpleHoster(Hoster):
                 except Exception:
                     pass
 
-        if html:
-            if search_pattern(cls.OFFLINE_PATTERN, html) is not None:
+        if html and info["status"] in (3, 7):
+            if search_pattern(self.OFFLINE_PATTERN, html) is not None:
                 info['status'] = 1
 
-            elif search_pattern(cls.TEMP_OFFLINE_PATTERN, html) is not None:
+            elif search_pattern(self.TEMP_OFFLINE_PATTERN, html) is not None:
                 info['status'] = 6
 
             else:
                 for attr in ("INFO_PATTERN", "NAME_PATTERN", "SIZE_PATTERN", "HASHSUM_PATTERN"):
                     try:
-                        pattern = getattr(cls, attr)
+                        pattern = getattr(self, attr)
                         pdict = search_pattern(pattern, html).groupdict()
 
                         if all(True for k in pdict if k not in info['pattern']):
@@ -176,12 +173,12 @@ class SimpleHoster(Hoster):
                         info['status'] = 2
 
         if 'N' in info['pattern']:
-            name = replace_patterns(info['pattern']['N'], cls.NAME_REPLACEMENTS)
+            name = replace_patterns(info['pattern']['N'], self.NAME_REPLACEMENTS)
             info['name'] = parse_name(name)
 
         if 'S' in info['pattern']:
             size = replace_patterns(info['pattern']['S'] + info['pattern']['U'] if 'U' in info['pattern'] else info['pattern']['S'],
-                                    cls.SIZE_REPLACEMENTS)
+                                    self.SIZE_REPLACEMENTS)
             info['size'] = parse_size(size)
 
         elif isinstance(info['size'], basestring):
@@ -269,15 +266,17 @@ class SimpleHoster(Hoster):
                 self.check_errors()
 
                 if self.info.get('status', 7) != 2:
-                    self.grab_info()
+                    super(SimpleHoster, self).grab_info()
                     self.check_status()
+                    self.pyfile.setStatus("starting")
                     self.check_duplicates()
 
-                if self.premium and (not self.CHECK_TRAFFIC or not self.out_of_traffic()):
+                out_of_traffic = self.CHECK_TRAFFIC and self.out_of_traffic()
+                if self.premium and not out_of_traffic:
                     self.log_info(_("Processing as premium download..."))
                     self.handle_premium(pyfile)
 
-                elif not self.LOGIN_ACCOUNT or (not self.CHECK_TRAFFIC or not self.out_of_traffic()):
+                elif not self.LOGIN_ACCOUNT or not out_of_traffic:
                     self.log_info(_("Processing as free download..."))
                     self.handle_free(pyfile)
 
@@ -316,25 +315,27 @@ class SimpleHoster(Hoster):
 
         self.log_info(_("No errors found"))
 
-    def check_errors(self):
+    def check_errors(self, data=None):
         self.log_info(_("Checking for link errors..."))
 
-        if not self.data:
+        data = data or self.data
+
+        if not data:
             self.log_warning(_("No data to check"))
             return
 
-        if search_pattern(self.IP_BLOCKED_PATTERN, self.data):
+        if search_pattern(self.IP_BLOCKED_PATTERN, data):
             self.fail(_("Connection from your current IP address is not allowed"))
 
         elif not self.premium:
-            if search_pattern(self.PREMIUM_ONLY_PATTERN, self.data):
+            if search_pattern(self.PREMIUM_ONLY_PATTERN, data):
                 self.fail(_("File can be downloaded by premium users only"))
 
-            elif search_pattern(self.SIZE_LIMIT_PATTERN, self.data):
+            elif search_pattern(self.SIZE_LIMIT_PATTERN, data):
                 self.fail(_("File too large for free download"))
 
             elif self.DL_LIMIT_PATTERN:
-                m = search_pattern(self.DL_LIMIT_PATTERN, self.data)
+                m = search_pattern(self.DL_LIMIT_PATTERN, data)
                 if m is not None:
                     try:
                         errmsg = m.group(1)
@@ -352,11 +353,11 @@ class SimpleHoster(Hoster):
                     self.wait(wait_time, reconnect=wait_time > self.config.get('max_wait', 10) * 60)
                     self.restart(_("Download limit exceeded"))
 
-        if search_pattern(self.HAPPY_HOUR_PATTERN, self.data):
+        if search_pattern(self.HAPPY_HOUR_PATTERN, data):
             self.multiDL = True
 
         if self.ERROR_PATTERN:
-            m = search_pattern(self.ERROR_PATTERN, self.data)
+            m = search_pattern(self.ERROR_PATTERN, data)
             if m is not None:
                 try:
                     errmsg = m.group(1).strip()
@@ -410,7 +411,7 @@ class SimpleHoster(Hoster):
                     self.restart(errmsg)
 
         elif self.WAIT_PATTERN:
-            m = search_pattern(self.WAIT_PATTERN, self.data)
+            m = search_pattern(self.WAIT_PATTERN, data)
             if m is not None:
                 try:
                     waitmsg = m.group(1).strip()
@@ -430,8 +431,18 @@ class SimpleHoster(Hoster):
         self.grab_info()
         return self.info
 
+    def grab_info(self):
+        if self.info.get("status", 7) != 2:
+            self.pyfile.name = parse_name(self.pyfile.url)
+
     def handle_direct(self, pyfile):
-        self.link = pyfile.url if self.isresource(pyfile.url) else None
+        link = self.isresource(pyfile.url)
+        if link:
+            pyfile.name = parse_name(link)
+            self.link = pyfile.url
+
+        else:
+            self.link = None
 
     def handle_multi(self, pyfile):  #: Multi-hoster handler
         pass

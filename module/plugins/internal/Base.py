@@ -26,7 +26,7 @@ def parse_fileInfo(klass, url="", html=""):
 class Base(Plugin):
     __name__ = "Base"
     __type__ = "base"
-    __version__ = "0.39"
+    __version__ = "0.41"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -39,18 +39,17 @@ class Base(Plugin):
 
     URL_REPLACEMENTS = []
 
-    @classmethod
-    def get_info(cls, url="", html=""):
+    def get_info(self, url="", html=""):
         url = fixurl(url, unquote=True)
         info = {'name': parse_name(url),
                 'hash': {},
                 'pattern': {},
                 'size': 0,
                 'status': 7 if url else 8,
-                'url': replace_patterns(url, cls.URL_REPLACEMENTS)}
+                'url': replace_patterns(url, self.URL_REPLACEMENTS)}
 
         try:
-            info['pattern'] = re.match(cls.__pattern__, url).groupdict()
+            info['pattern'] = re.match(self.__pattern__, url).groupdict()
 
         except Exception:
             pass
@@ -436,8 +435,6 @@ class Base(Plugin):
                 self.restart_free = True
             else:
                 self.fail("%s | %s" % (msg, _("Url was already processed as free")))
-
-        self.req.clearCookies()
 
         raise Retry(encode(msg))  # @TODO: Remove `encode` in 0.4.10
 

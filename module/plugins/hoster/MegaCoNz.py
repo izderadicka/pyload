@@ -263,15 +263,15 @@ class MegaClient(object):
 class MegaCoNz(Hoster):
     __name__ = "MegaCoNz"
     __type__ = "hoster"
-    __version__ = "0.55"
+    __version__ = "0.58"
     __status__ = "testing"
 
-    __pattern__ = r'(?:https?://(?:www\.)?mega(?:\.co)?\.nz/|mega:|chrome:.+?)(?:file/|#(?P<TYPE>N|)!)(?P<ID>[\w^_]+)[!#](?P<KEY>[\w\-,=]+)(?:###n=(?P<OWNER>[\w^_]+))?'
+    __pattern__ = r'https?://(?:www\.)?mega(?:\.co)?\.nz/(?:file/(?P<ID1>[\w^_]+)#(?P<K1>[\w\-,=]+)|folder/(?P<ID2>[\w^_]+)#(?P<K2>[\w\-,=]+)/file/(?P<NID>[\w^_]+)|#!(?P<ID3>[\w^_]+)!(?P<K3>[\w\-,=]+))'
     __config__ = [("activated", "bool", "Activated", True)]
 
     __description__ = """Mega.co.nz hoster plugin"""
     __license__ = "GPLv3"
-    __authors__ = [("RaNaN", "ranan@pyload.org"),
+    __authors__ = [("RaNaN", "ranan@pyload.net"),
                    ("Walter Purcaro", "vuolter@gmail.com"),
                    ("GammaC0de", "nitzo2001[AT}yahoo[DOT]com")]
 
@@ -379,40 +379,52 @@ class MegaCoNz(Hoster):
                 self.skip(_("File exists."))
 
     def process(self, pyfile):
-        id = self.info['pattern']['ID']
-        key = self.info['pattern']['KEY']
-        public = self.info['pattern']['TYPE'] in ("", None)
-        owner = self.info['pattern']['OWNER']
-
-        if not public and not owner:
-            self.log_error(_("Missing owner in URL"))
-            self.fail(_("Missing owner in URL"))
+        node_id = self.info['pattern']['NID']
+        public = node_id in ("", None)
+        id = self.info['pattern']['ID1'] or self.info['pattern']['ID2'] or self.info['pattern']['ID3']
+        key = self.info['pattern']['K1'] or self.info['pattern']['K2'] or self.info['pattern']['K3']
 
         self.log_debug("ID: %s" % id,
-                       _("Key: %s") % key,
-                       _("Type: %s") % ("public" if public else "node"),
-                       _("Owner: %s") % owner)
+                       "Key: %s" % key,
+                       "Type: %s" % ("public" if public else "node"),
+                       "Owner: %s" % node_id)
 
-        key = MegaCrypto.base64_to_a32(key)
-        if len(key) != 8:
+        mega = MegaClient(self, id)
+
+        master_key = MegaCrypto.base64_to_a32(key)
+        if not public:
+            #: F is for requesting folder listing (kind like a `ls` command)
+            res = mega.api_response(a="f", c=1, r=1, ca=1, ssl=1)
+            if isinstance(res, int):
+                mega.check_error(res)
+            elif isinstance(res, dict) and 'e' in res:
+                mega.check_error(res['e'])
+
+            for node in res['f']:
+                if node['t'] == 0 and ":" in node["k"] and node['h'] == node_id:
+                    master_key = MegaCrypto.decrypt_key(node['k'][node['k'].index(':') + 1:], master_key)
+                    break
+
+            else:
+                self.offline()
+
+        if len(master_key) != 8:
             self.log_error(_("Invalid key length"))
             self.fail(_("Invalid key length"))
-
-        mega = MegaClient(self, self.info['pattern']['OWNER'] or self.info['pattern']['ID'])
 
         #: G is for requesting a download url
         #: This is similar to the calls in the mega js app, documentation is very bad
         if public:
             res = mega.api_response(a="g", g=1, p=id, ssl=1)
         else:
-            res = mega.api_response(a="g", g=1, n=id, ssl=1)
+            res = mega.api_response(a="g", g=1, n=node_id, ssl=1)
 
         if isinstance(res, int):
             mega.check_error(res)
         elif isinstance(res, dict) and 'e' in res:
             mega.check_error(res['e'])
 
-        attr = MegaCrypto.decrypt_attr(res['at'], key)
+        attr = MegaCrypto.decrypt_attr(res['at'], master_key)
         if not attr:
             self.fail(_("Decryption failed"))
 
@@ -433,7 +445,7 @@ class MegaCoNz(Hoster):
         # self.req.http.c.setopt(pycurl.SSL_CIPHER_LIST, "RC4-MD5:DEFAULT")
 
         try:
-            self.download(res['g'])
+            self.download(res['g'], disposition=False)
 
         except BadHeader, e:
             if e.code == 509:
@@ -442,7 +454,7 @@ class MegaCoNz(Hoster):
             else:
                 raise
 
-        self.decrypt_file(key)
+        self.decrypt_file(master_key)
 
         #: Everything is finished and final name can be set
         pyfile.name = name

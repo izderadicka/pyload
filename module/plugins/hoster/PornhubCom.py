@@ -2,43 +2,14 @@
 
 import re
 
-from module.network.CookieJar import CookieJar
-from module.network.HTTPRequest import HTTPRequest
-
-from ..internal.misc import json
+from ..internal.misc import BIGHTTPRequest, json
 from ..internal.SimpleHoster import SimpleHoster
-from ..internal.Plugin import Abort
-
-
-class BIGHTTPRequest(HTTPRequest):
-    """
-    Overcome HTTPRequest's load() size limit to allow
-    loading very big web pages by overrding HTTPRequest's write() function
-    """
-
-    # @TODO: Add 'limit' parameter to HTTPRequest in v0.4.10
-    def __init__(self, cookies=None, options=None, limit=1000000):
-        self.limit = limit
-        HTTPRequest.__init__(self, cookies=cookies, options=options)
-
-    def write(self, buf):
-        """ writes response """
-        if self.limit and self.rep.tell() > self.limit or self.abort:
-            rep = self.getResponse()
-            if self.abort:
-                raise Abort()
-            f = open("response.dump", "wb")
-            f.write(rep)
-            f.close()
-            raise Exception("Loaded Url exceeded limit")
-
-        self.rep.write(buf)
 
 
 class PornhubCom(SimpleHoster):
     __name__ = "PornhubCom"
     __type__ = "hoster"
-    __version__ = "0.60"
+    __version__ = "0.62"
     __status__ = "testing"
 
     __pattern__ = r'https?://(?:www\.)?pornhub\.com/view_video\.php\?viewkey=\w+'
@@ -59,9 +30,8 @@ class PornhubCom(SimpleHoster):
     OFFLINE_PATTERN = r'^unmatchable$'  # Who knows?
 
 
-    @classmethod
-    def get_info(cls, url="", html=""):
-        info = super(PornhubCom, cls).get_info(url, html)
+    def get_info(self, url="", html=""):
+        info = super(PornhubCom, self).get_info(url, html)
         # Unfortunately, NAME_PATTERN does not include file extension so we blindly add '.mp4' as an extension.
         # (hopefully all links are '.mp4' files)
         if 'name' in info:
@@ -79,7 +49,7 @@ class PornhubCom(SimpleHoster):
             pass
 
         self.req.http = BIGHTTPRequest(
-            cookies=CookieJar(None),
+            cookies=self.req.cj,
             options=self.pyload.requestFactory.getOptions(),
             limit=2000000)
 
