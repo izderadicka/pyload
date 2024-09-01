@@ -3,13 +3,13 @@
 from ..internal.XFSHoster import XFSHoster
 
 
-class DropDownload(XFSHoster):
-    __name__ = "DropDownload"
+class WorldbytezCom(XFSHoster):
+    __name__ = "WorldbytezCom"
     __type__ = "hoster"
-    __version__ = "0.04"
+    __version__ = "0.01"
     __status__ = "testing"
 
-    __pattern__ = r"https?://(?:www\.)?drop\.download/\w{12}"
+    __pattern__ = r"https?://(?:www\.)?worldbytez\.com/\w{12}"
     __config__ = [
         ("activated", "bool", "Activated", True),
         ("use_premium", "bool", "Use premium account if available", True),
@@ -18,16 +18,15 @@ class DropDownload(XFSHoster):
         ("max_wait", "int", "Reconnect if waiting time is greater than minutes", 10),
     ]
 
-    __description__ = """Drop.download hoster plugin"""
+    __description__ = """Worldbytez.com hoster plugin"""
     __license__ = "GPLv3"
     __authors__ = [("GammaC0de", "nitzo2001[AT]yahoo[DOT]com")]
 
-    PLUGIN_DOMAIN = "drop.download"
-    LINK_PATTERN = r'<a href="(https://s\d+\.drop\.download.+?)"'
+    PLUGIN_DOMAIN = "worldbytez.com"
 
-    DL_LIMIT_PATTERN = r'You have reached the download-limit: [\d.,]+\s*[a-zA-Z]* for last (\d+ days)'
+    PLUGIN_URL = "https://worldbytez.com/download"
 
-    def setup(self):
-        self.multi_dl = True
-        self.resume_download = True
-        self.chunk_limit = -1
+    WAIT_PATTERN = r'<span class="seconds">(\d+)</span>'
+    SIZE_LIMIT_PATTERN = r'Upgrade your account to download bigger files'
+
+    LINK_PATTERN = r'<a href="(https://[^/]+/d/[^"]+)"'

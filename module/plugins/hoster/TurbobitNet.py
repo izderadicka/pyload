@@ -11,10 +11,10 @@ from ..internal.SimpleHoster import SimpleHoster
 class TurbobitNet(SimpleHoster):
     __name__ = "TurbobitNet"
     __type__ = "hoster"
-    __version__ = "0.51"
+    __version__ = "0.54"
     __status__ = "testing"
 
-    __pattern__ = r'https?://(?:(?:www|m)\.)?(?:(?:trbbt|turbo(?:beet|bite?))\.net|(?:tourbobit|turbobi(?:tn?|f))\.com|turbo?\.(?:to|cc)|turb\.pw)/(?:download/free/)?(?P<ID>\w+)'
+    __pattern__ = r'https?://(?:(?:www|m)\.)?(?:(?:trbbt|turbo(?:beet|bit[ea]?))\.net|(?:tourbobit|turbobi(?:tn?|f))\.com|turbo?\.(?:to|cc)|turb\.pw)/(?:download/free/)?(?P<ID>\w+)'
     __config__ = [("activated", "bool", "Activated", True),
                   ("use_premium", "bool", "Use premium account if available", True),
                   ("fallback", "bool","Fallback to free download if premium fails", True),
@@ -33,11 +33,11 @@ class TurbobitNet(SimpleHoster):
     COOKIES = [("turbobit.net", "user_lang", "en")]
 
     INFO_PATTERN = r'<title>\s*Download file (?P<N>.+?) \((?P<S>[\d., ]+) (?P<U>[\w^_]+)\)'
-    OFFLINE_PATTERN = r'<h2>File Not Found</h2>|html\(\'File (?:was )?not found'
+    OFFLINE_PATTERN = r'<h2>File Not Found</h2>|html\(\'File (?:was )?not found|>Searching for the file\.\.\.Please wait'
     TEMP_OFFLINE_PATTERN = r'^unmatchable$'
 
     LINK_FREE_PATTERN = r'(/download/redirect/[^"\']+)'
-    LINK_PREMIUM_PATTERN = r'<a href=[\'"](.+?/download/redirect/[^"\']+)'
+    LINK_PREMIUM_PATTERN = r'href=[\'"](.+?/download/redirect/[^"\']+)'
 
     LIMIT_WAIT_PATTERN = r'<div id=\'timeout\'>(\d+)<'
 

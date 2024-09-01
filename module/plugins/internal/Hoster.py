@@ -33,7 +33,7 @@ if not hasattr(__builtin__.property, "setter"):
 class Hoster(Base):
     __name__ = "Hoster"
     __type__ = "hoster"
-    __version__ = "0.82"
+    __version__ = "0.84"
     __status__ = "stable"
 
     __pattern__ = r'^unmatchable$'
@@ -160,7 +160,6 @@ class Hoster(Base):
 
     def isresource(self, url, redirect=True, resumable=None):
         resource = False
-        maxredirs = 5
 
         if resumable is None:
             resumable = self.resume_download
@@ -169,9 +168,13 @@ class Hoster(Base):
             maxredirs = max(redirect, 1)
 
         elif redirect:
-            maxredirs = int(self.config.get("maxredirs", plugin="UserAgentSwitcher")) or maxredirs  # @TODO: Remove `int` in 0.4.10
+            maxredirs = int(self.config.get("maxredirs", 5, plugin="UserAgentSwitcher"))  # @TODO: Remove `int` in 0.4.10
 
-        header = self.load(url, just_header=True)
+        else:
+            maxredirs = 1
+
+
+        header = self.load(url, just_header=True, redirect=False)
 
         for i in range(1, maxredirs):
             if not redirect or header.get('connection') == "close":
@@ -186,7 +189,7 @@ class Hoster(Base):
 
                 if code in (301, 302) or resumable:
                     self.log_debug("Redirect #%d to: %s" % (i, location))
-                    header = self.load(location, just_header=True)
+                    header = self.load(location, just_header=True, redirect=False)
                     url = location
                     continue
 
@@ -246,9 +249,12 @@ class Hoster(Base):
 
         else:
             if self.req.code in (404, 410):
-                bad_file = fsjoin(os.path.dirname(filename), newname)
-                if self.remove(bad_file):
-                    return ""
+                if newname:
+                    bad_file = fsjoin(os.path.dirname(filename), newname)
+                else:
+                    bad_file = filename
+                self.remove(bad_file)
+                return ""
             else:
                 self.log_info(_("File saved"))
 
